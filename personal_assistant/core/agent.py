@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import BaseMessage, HumanMessage
 from langchain_core.tools import BaseTool
@@ -36,13 +37,13 @@ class Agent:
         self._tools: list[BaseTool] = []
         self._history: list[BaseMessage] = []
         self._llm = registry.get(config.provider).get_model(config.model)
-        self._graph = self._build_graph()
+        self._graph: Any = self._build_graph()
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _build_graph(self):
+    def _build_graph(self) -> Any:
         return create_react_agent(
             model=self._llm,
             tools=self._tools,
@@ -75,11 +76,11 @@ class Agent:
         """Run a task and return the agent's final text response."""
         self._history.append(HumanMessage(content=task))
         result = self._graph.invoke({"messages": self._history})
-        # Replace history with the full updated message list (includes tool calls etc.)
         self._history = result["messages"]
-        return self._history[-1].content
+        content = self._history[-1].content
+        return content if isinstance(content, str) else str(content)
 
-    def stream(self, task: str):
+    def stream(self, task: str) -> Iterator[BaseMessage]:
         """Stream agent messages as they are produced."""
         self._history.append(HumanMessage(content=task))
         for chunk in self._graph.stream(

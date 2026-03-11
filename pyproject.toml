@@ -16,6 +16,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "mypy>=1.19.1",
     "pytest>=9.0.2",
     "pytest-mock>=3.15.1",
     "ruff>=0.15.5",
@@ -49,3 +50,10 @@ known-first-party = ["personal_assistant"]
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+pretty = true
+# Third-party libraries without stubs — ignore missing imports
+ignore_missing_imports = true

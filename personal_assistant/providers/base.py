@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 
@@ -31,7 +32,7 @@ class AIProvider(ABC):
         return self.config.default_model
 
     @abstractmethod
-    def get_model(self, model: str | None = None, **kwargs) -> BaseChatModel:
+    def get_model(self, model: str | None = None, **kwargs: Any) -> BaseChatModel:
         """Return a configured LangChain chat model instance.
 
         Args:

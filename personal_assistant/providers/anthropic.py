@@ -1,8 +1,10 @@
 import os
 from dataclasses import dataclass
+from typing import Any
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
+from pydantic import SecretStr
 
 from personal_assistant.providers.base import AIProvider, ProviderConfig
 
@@ -23,11 +25,15 @@ class AnthropicProvider(AIProvider):
         super().__init__(config or AnthropicConfig())
         self.config: AnthropicConfig
 
-    def get_model(self, model: str | None = None, **kwargs) -> BaseChatModel:
-        return ChatAnthropic(
+    def get_model(self, model: str | None = None, **kwargs: Any) -> BaseChatModel:
+        raw_key = self.config.api_key or os.getenv("ANTHROPIC_API_KEY")
+        extra: dict[str, Any] = {}
+        if raw_key:
+            extra["api_key"] = SecretStr(raw_key)
+        return ChatAnthropic(  # type: ignore[call-arg]
             model=model or self.config.default_model,
-            api_key=self.config.api_key or os.getenv("ANTHROPIC_API_KEY"),
             temperature=kwargs.pop("temperature", self.config.temperature),
             max_tokens=kwargs.pop("max_tokens", self.config.max_tokens),
+            **extra,
             **kwargs,
         )

@@ -142,6 +142,7 @@ class Orchestrator:
             if not agents:
                 raise RuntimeError(f"No agents in workspace '{workspace.config.name}'.")
             agent = workspace.get_agent(agents[0])
+            assert agent is not None  # guaranteed: agents[0] was just retrieved from the same dict
 
         return agent.run(task)
 

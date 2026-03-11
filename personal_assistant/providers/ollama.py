@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Any
 
 from langchain_core.language_models import BaseChatModel
 from langchain_ollama import ChatOllama
@@ -25,7 +26,7 @@ class OllamaProvider(AIProvider):
         super().__init__(config or OllamaConfig())
         self.config: OllamaConfig
 
-    def get_model(self, model: str | None = None, **kwargs) -> BaseChatModel:
+    def get_model(self, model: str | None = None, **kwargs: Any) -> BaseChatModel:
         return ChatOllama(
             model=model or self.config.default_model,
             base_url=self.config.base_url,

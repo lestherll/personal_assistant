@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from typing import Any
 
 from langchain_core.tools import BaseTool
 
@@ -9,7 +10,7 @@ from personal_assistant.core.agent import Agent
 class WorkspaceConfig:
     name: str
     description: str
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class Workspace:
