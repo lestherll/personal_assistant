@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 
-from .base import AIProvider, ProviderConfig
+from personal_assistant.providers.base import AIProvider, ProviderConfig
 
 
 @dataclass

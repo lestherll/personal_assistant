@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from ..providers.registry import ProviderRegistry
-from .workspace import Workspace, WorkspaceConfig
+from personal_assistant.providers.registry import ProviderRegistry
+from personal_assistant.core.workspace import Workspace, WorkspaceConfig
 
 if TYPE_CHECKING:
-    from .agent import Agent, AgentConfig
+    from personal_assistant.core.agent import Agent, AgentConfig
 
 
 class Orchestrator:
@@ -81,7 +81,7 @@ class Orchestrator:
         Returns:
             The newly created Agent.
         """
-        from .agent import Agent
+        from personal_assistant.core.agent import Agent
 
         workspace = (
             self.get_workspace(workspace_name) if workspace_name else self.active_workspace
@@ -102,7 +102,7 @@ class Orchestrator:
         Useful for hot-swapping provider, model, or system prompt without
         touching the rest of the workspace.
         """
-        from .agent import Agent
+        from personal_assistant.core.agent import Agent
 
         workspace = (
             self.get_workspace(workspace_name) if workspace_name else self.active_workspace

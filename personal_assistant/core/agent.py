@@ -8,7 +8,7 @@ from langchain_core.tools import BaseTool
 from langgraph.prebuilt import create_react_agent
 
 if TYPE_CHECKING:
-    from ..providers.registry import ProviderRegistry
+    from personal_assistant.providers.registry import ProviderRegistry
 
 
 @dataclass

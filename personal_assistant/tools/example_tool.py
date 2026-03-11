@@ -1,6 +1,6 @@
 from pydantic import BaseModel, Field
 
-from ..core.tool import AssistantTool
+from personal_assistant.core.tool import AssistantTool
 
 
 class EchoInput(BaseModel):

@@ -1,7 +1,7 @@
-from ..agents.assistant_agent import AssistantAgent
-from ..core.orchestrator import Orchestrator
-from ..core.workspace import Workspace, WorkspaceConfig
-from ..tools.example_tool import EchoTool
+from personal_assistant.agents.assistant_agent import AssistantAgent
+from personal_assistant.core.orchestrator import Orchestrator
+from personal_assistant.core.workspace import Workspace, WorkspaceConfig
+from personal_assistant.tools.example_tool import EchoTool
 
 
 def create_default_workspace(orchestrator: Orchestrator) -> Workspace:

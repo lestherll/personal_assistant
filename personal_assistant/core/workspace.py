@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 
 from langchain_core.tools import BaseTool
 
-from .agent import Agent
+from personal_assistant.core.agent import Agent
 
 
 @dataclass

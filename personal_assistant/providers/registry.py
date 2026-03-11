@@ -1,4 +1,4 @@
-from .base import AIProvider
+from personal_assistant.providers.base import AIProvider
 
 
 class ProviderRegistry:

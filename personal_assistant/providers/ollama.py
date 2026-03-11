@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from langchain_ollama import ChatOllama
 from langchain_core.language_models import BaseChatModel
 
-from .base import AIProvider, ProviderConfig
+from personal_assistant.providers.base import AIProvider, ProviderConfig
 
 
 @dataclass

@@ -1,5 +1,5 @@
-from ..core.agent import Agent, AgentConfig
-from ..providers.registry import ProviderRegistry
+from personal_assistant.core.agent import Agent, AgentConfig
+from personal_assistant.providers.registry import ProviderRegistry
 
 
 class AssistantAgent(Agent):
