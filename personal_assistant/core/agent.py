@@ -16,8 +16,8 @@ class AgentConfig:
     name: str
     description: str
     system_prompt: str
-    provider: str | None = None   # Registry key — None means use the registry default
-    model: str | None = None      # Model name — None means use the provider's default
+    provider: str | None = None  # Registry key — None means use the registry default
+    model: str | None = None  # Model name — None means use the provider's default
     # Names of tools this agent is allowed to use (empty = accept all added tools)
     allowed_tools: list[str] = field(default_factory=list)
 

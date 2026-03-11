@@ -41,4 +41,6 @@ class AIProvider(ABC):
         ...
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(name={self.name!r}, default_model={self.default_model!r})"
+        return (
+            f"{self.__class__.__name__}(name={self.name!r}, default_model={self.default_model!r})"
+        )

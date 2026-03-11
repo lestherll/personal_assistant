@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from personal_assistant.providers.registry import ProviderRegistry
 from personal_assistant.core.workspace import Workspace, WorkspaceConfig
+from personal_assistant.providers.registry import ProviderRegistry
 
 if TYPE_CHECKING:
     from personal_assistant.core.agent import Agent, AgentConfig
@@ -69,9 +69,9 @@ class Orchestrator:
 
     def create_agent(
         self,
-        config: "AgentConfig",
+        config: AgentConfig,
         workspace_name: str | None = None,
-    ) -> "Agent":
+    ) -> Agent:
         """Create an agent from a config and add it to a workspace.
 
         Args:
@@ -83,9 +83,7 @@ class Orchestrator:
         """
         from personal_assistant.core.agent import Agent
 
-        workspace = (
-            self.get_workspace(workspace_name) if workspace_name else self.active_workspace
-        )
+        workspace = self.get_workspace(workspace_name) if workspace_name else self.active_workspace
         if workspace is None:
             raise RuntimeError("No active workspace. Create one first.")
         agent = Agent(config, self.registry)
@@ -94,9 +92,9 @@ class Orchestrator:
 
     def replace_agent(
         self,
-        config: "AgentConfig",
+        config: AgentConfig,
         workspace_name: str | None = None,
-    ) -> "Agent":
+    ) -> Agent:
         """Replace an existing agent (matched by config.name) with a fresh one.
 
         Useful for hot-swapping provider, model, or system prompt without
@@ -104,9 +102,7 @@ class Orchestrator:
         """
         from personal_assistant.core.agent import Agent
 
-        workspace = (
-            self.get_workspace(workspace_name) if workspace_name else self.active_workspace
-        )
+        workspace = self.get_workspace(workspace_name) if workspace_name else self.active_workspace
         if workspace is None:
             raise RuntimeError("No active workspace.")
         agent = Agent(config, self.registry)
@@ -131,9 +127,7 @@ class Orchestrator:
                         available agent in the workspace.
             workspace_name: Target a specific workspace. Defaults to the active one.
         """
-        workspace = (
-            self.get_workspace(workspace_name) if workspace_name else self.active_workspace
-        )
+        workspace = self.get_workspace(workspace_name) if workspace_name else self.active_workspace
         if workspace is None:
             raise RuntimeError("No active workspace. Create one first.")
 

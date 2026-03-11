@@ -1,11 +1,12 @@
+from unittest.mock import patch
+
 import pytest
-from unittest.mock import MagicMock, patch
 
 from personal_assistant.core.agent import AgentConfig
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.core.workspace import WorkspaceConfig
 from personal_assistant.providers.registry import ProviderRegistry
-from tests.unit.conftest import make_mock_provider, make_mock_graph
+from tests.unit.conftest import make_mock_graph, make_mock_provider
 from tests.unit.core.test_workspace import make_mock_agent
 
 
@@ -28,7 +29,7 @@ def workspace_config():
 
 class TestWorkspaceManagement:
     def test_create_workspace(self, orchestrator, workspace_config):
-        ws = orchestrator.create_workspace(workspace_config)
+        orchestrator.create_workspace(workspace_config)
         assert "test" in orchestrator.list_workspaces()
 
     def test_first_workspace_becomes_active(self, orchestrator, workspace_config):
@@ -80,17 +81,17 @@ class TestDelegation:
         agent_b.run.return_value = "from beta"
         ws.add_agent(agent_a)
         ws.add_agent(agent_b)
-        result = orchestrator.delegate("task", agent_name="Beta")
+        orchestrator.delegate("task", agent_name="Beta")
         agent_b.run.assert_called_once()
         agent_a.run.assert_not_called()
 
     def test_delegate_to_named_workspace(self, orchestrator):
-        ws1 = orchestrator.create_workspace(WorkspaceConfig(name="ws1", description=""))
+        orchestrator.create_workspace(WorkspaceConfig(name="ws1", description=""))
         ws2 = orchestrator.create_workspace(WorkspaceConfig(name="ws2", description=""))
         agent = make_mock_agent("Bot")
         agent.run.return_value = "from ws2"
         ws2.add_agent(agent)
-        result = orchestrator.delegate("task", workspace_name="ws2")
+        orchestrator.delegate("task", workspace_name="ws2")
         agent.run.assert_called_once_with("task")
 
     def test_delegate_no_active_workspace_raises(self, orchestrator):
@@ -113,7 +114,8 @@ class TestAgentHelpers:
     def test_create_agent_adds_to_active_workspace(self, orchestrator, workspace_config):
         orchestrator.create_workspace(workspace_config)
         config = AgentConfig(name="NewBot", description="", system_prompt="Be helpful.")
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=make_mock_graph()):
+        mock = make_mock_graph()
+        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
             orchestrator.create_agent(config)
         assert "NewBot" in orchestrator.active_workspace.list_agents()
 
@@ -122,7 +124,8 @@ class TestAgentHelpers:
         old_agent = make_mock_agent("Bot")
         orchestrator.active_workspace.add_agent(old_agent)
         config = AgentConfig(name="Bot", description="", system_prompt="New prompt.")
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=make_mock_graph()):
+        mock = make_mock_graph()
+        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
             orchestrator.replace_agent(config)
         # A new Agent instance replaced the mock — verify it's no longer the old mock
         assert orchestrator.active_workspace.get_agent("Bot") is not old_agent

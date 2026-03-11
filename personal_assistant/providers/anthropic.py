@@ -1,5 +1,5 @@
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
@@ -11,7 +11,7 @@ from personal_assistant.providers.base import AIProvider, ProviderConfig
 class AnthropicConfig(ProviderConfig):
     name: str = "anthropic"
     default_model: str = "claude-opus-4-6"
-    api_key: str | None = None          # Falls back to ANTHROPIC_API_KEY env var
+    api_key: str | None = None  # Falls back to ANTHROPIC_API_KEY env var
     temperature: float = 0
     max_tokens: int = 8096
 

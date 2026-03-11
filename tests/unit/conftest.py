@@ -1,16 +1,17 @@
 """Shared fixtures for unit tests."""
-import pytest
+
 from unittest.mock import MagicMock, patch
 
+import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from personal_assistant.core.agent import Agent, AgentConfig
-from personal_assistant.providers.base import AIProvider, ProviderConfig
-
+from personal_assistant.providers.base import AIProvider
 
 # ---------------------------------------------------------------------------
 # Provider / registry helpers
 # ---------------------------------------------------------------------------
+
 
 def make_mock_provider(name: str = "mock") -> AIProvider:
     provider = MagicMock(spec=AIProvider)
@@ -28,6 +29,7 @@ def mock_provider():
 @pytest.fixture
 def mock_registry(mock_provider):
     from personal_assistant.providers.registry import ProviderRegistry
+
     registry = ProviderRegistry()
     registry.register(mock_provider, default=True)
     return registry
@@ -36,6 +38,7 @@ def mock_registry(mock_provider):
 # ---------------------------------------------------------------------------
 # Agent helpers
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture
 def agent_config():
@@ -54,9 +57,9 @@ def make_mock_graph(response: str = "Test response"):
             AIMessage(content=response),
         ]
     }
-    graph.stream.return_value = iter([
-        {"messages": [HumanMessage(content="Hello"), AIMessage(content=response)]}
-    ])
+    graph.stream.return_value = iter(
+        [{"messages": [HumanMessage(content="Hello"), AIMessage(content=response)]}]
+    )
     return graph
 
 

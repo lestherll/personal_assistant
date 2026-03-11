@@ -1,11 +1,8 @@
-import pytest
-from unittest.mock import MagicMock, patch, call
+from unittest.mock import MagicMock, patch
 
-from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.tools import BaseTool
 
 from personal_assistant.core.agent import Agent, AgentConfig
-from tests.unit.conftest import make_mock_graph
 
 
 def make_tool(name: str = "test_tool") -> BaseTool:
@@ -19,7 +16,7 @@ class TestAgentCreation:
         registry = MagicMock()
         registry.get.return_value.get_model.return_value = MagicMock()
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
-            agent = Agent(agent_config, registry)
+            Agent(agent_config, registry)
         registry.get.assert_called_with(agent_config.provider)
 
     def test_agent_starts_with_empty_history(self, agent):

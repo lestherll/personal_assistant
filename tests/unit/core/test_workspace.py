@@ -1,11 +1,10 @@
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
+import pytest
 from langchain_core.tools import BaseTool
 
 from personal_assistant.core.agent import Agent, AgentConfig
 from personal_assistant.core.workspace import Workspace, WorkspaceConfig
-from tests.unit.conftest import make_mock_graph
 
 
 def make_mock_agent(name: str = "TestAgent") -> Agent:

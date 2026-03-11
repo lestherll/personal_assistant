@@ -1,19 +1,18 @@
 from dotenv import load_dotenv
 
-load_dotenv()
-
-from personal_assistant.core.agent import AgentConfig
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.providers import (
-    ProviderRegistry,
     AnthropicProvider,
-    OllamaProvider,
     OllamaConfig,
+    OllamaProvider,
+    ProviderRegistry,
 )
 from personal_assistant.workspaces.default_workspace import create_default_workspace
 
 
 def main() -> None:
+    load_dotenv()
+
     # --- Provider registry ---
     registry = ProviderRegistry()
     registry.register(AnthropicProvider())
