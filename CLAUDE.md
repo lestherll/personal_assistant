@@ -13,6 +13,11 @@ A modular AI personal assistant built on LangChain and LangGraph. The core conce
 - **python-dotenv** — `.env` loading
 - **pydantic v2** — tool input schemas
 
+### Dev tooling
+- **ruff** — linting + formatting (`uv run ruff check .` / `uv run ruff format .`)
+- **mypy** — static type checking in strict mode (`uv run mypy .`)
+- **pytest** + **pytest-mock** — unit tests (`uv run pytest`)
+
 ## Project Structure
 
 ```
@@ -33,6 +38,11 @@ personal_assistant/
 │   └── example_tool.py     # EchoTool — template for new tools
 └── workspaces/
     └── default_workspace.py  # Factory: wires default agent + tools into a workspace
+tests/
+└── unit/
+    ├── conftest.py           # Shared fixtures
+    ├── core/                 # Tests for agent, workspace, orchestrator
+    └── providers/            # Tests for provider registry
 main.py                       # Entry point — bootstraps registry, orchestrator, REPL
 ```
 
@@ -64,6 +74,10 @@ Ollama runs locally at `http://localhost:11434`. Pull models with `ollama pull <
 ```bash
 uv run python main.py        # Start the REPL
 uv add <package>             # Add a dependency
+uv run pytest                # Run tests
+uv run ruff check .          # Lint
+uv run ruff format .         # Format
+uv run mypy .                # Type-check
 ```
 
 ## Conventions

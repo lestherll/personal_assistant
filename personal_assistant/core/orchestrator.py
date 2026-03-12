@@ -65,6 +65,17 @@ class Orchestrator:
     def list_workspaces(self) -> list[str]:
         return list(self._workspaces.keys())
 
+    def remove_workspace(self, name: str) -> None:
+        """Remove a workspace by name. No-op if it does not exist.
+
+        If the removed workspace was the active one, the active workspace is
+        reset to the first remaining workspace, or None if none remain.
+        """
+        self._workspaces.pop(name, None)
+        if self._active_workspace == name:
+            remaining = list(self._workspaces.keys())
+            self._active_workspace = remaining[0] if remaining else None
+
     # ------------------------------------------------------------------
     # Agent management helpers
     # ------------------------------------------------------------------
@@ -110,6 +121,23 @@ class Orchestrator:
         agent = Agent(config, self.registry)
         workspace.replace_agent(agent)
         return agent
+
+    def create_unmanaged_agent(self, config: AgentConfig) -> Agent:
+        """Create an agent without adding it to any workspace.
+
+        The agent is backed by the orchestrator's registry but is not tracked
+        in any workspace. Useful for one-off agents that don't require workspace
+        tool propagation or lifecycle management.
+
+        Args:
+            config: AgentConfig describing the agent's name, prompt, provider, etc.
+
+        Returns:
+            An unmanaged Agent instance.
+        """
+        from personal_assistant.core.agent import Agent
+
+        return Agent(config, self.registry)
 
     # ------------------------------------------------------------------
     # Task delegation
