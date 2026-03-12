@@ -4,7 +4,7 @@ from typing import Any
 from langchain_core.tools import BaseTool
 
 
-class AssistantTool(BaseTool):
+class AssistantTool[R](BaseTool):
     """Base class for all personal assistant tools.
 
     Subclass this and implement `_run` to create a new tool.
@@ -12,10 +12,10 @@ class AssistantTool(BaseTool):
     """
 
     @abstractmethod
-    def _run(self, *args: Any, **kwargs: Any) -> Any:
+    def _run(self, *args: Any, **kwargs: Any) -> R:
         """Execute the tool synchronously."""
         ...
 
-    async def _arun(self, *args: Any, **kwargs: Any) -> Any:
+    async def _arun(self, *args: Any, **kwargs: Any) -> R:
         """Execute the tool asynchronously (delegates to sync by default)."""
         return self._run(*args, **kwargs)

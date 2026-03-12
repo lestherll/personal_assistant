@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 from langchain_core.tools import BaseTool
 
 from personal_assistant.core.agent import Agent, AgentConfig
+from personal_assistant.tools.example_tool import AgentInformationTool
 
 
 def make_tool(name: str = "test_tool") -> BaseTool:
@@ -67,6 +68,37 @@ class TestToolManagement:
             agent.register_tool(make_tool("tool_b"))
         assert "tool_a" in agent.tools
         assert "tool_b" in agent.tools
+
+    def test_register_tool_injects_agent_config(self, agent, mock_graph) -> None:
+        tool = AgentInformationTool()
+        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+            agent.register_tool(tool)
+        registered = next(t for t in agent._tools if t.name == "agent_info")
+        assert registered.agent_config == agent.config
+
+    def test_register_tool_does_not_mutate_original(self, agent, mock_graph) -> None:
+        tool = AgentInformationTool()
+        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+            agent.register_tool(tool)
+        assert tool.agent_config is None
+
+    def test_register_tool_different_agents_get_separate_copies(
+        self, agent_config, mock_registry, mock_graph
+    ) -> None:
+        tool = AgentInformationTool()
+        config_b = AgentConfig(name="AgentB", description="Agent B", system_prompt="You are B.")
+        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+            agent_a = Agent(agent_config, mock_registry)
+            agent_b = Agent(config_b, mock_registry)
+            agent_a.register_tool(tool)
+            agent_b.register_tool(tool)
+        tool_a = next(t for t in agent_a._tools if t.name == "agent_info")
+        tool_b = next(t for t in agent_b._tools if t.name == "agent_info")
+        assert tool_a is not tool_b
+        assert tool_a.agent_config is not None
+        assert tool_b.agent_config is not None
+        assert tool_a.agent_config.name == agent_config.name
+        assert tool_b.agent_config.name == "AgentB"
 
 
 class TestRunAndHistory:

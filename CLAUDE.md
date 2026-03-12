@@ -39,7 +39,7 @@ personal_assistant/
 ├── agents/
 │   └── assistant_agent.py  # AssistantAgent — general-purpose starter agent
 ├── tools/
-│   └── example_tool.py     # EchoTool — template for new tools
+│   └── example_tool.py     # EchoTool, AgentInformationTool — tool examples/templates
 ├── workspaces/
 │   └── default_workspace.py  # Factory: wires default agent + tools into a workspace
 ├── persistence/
@@ -66,6 +66,7 @@ tests/
 │   ├── core/                 # Tests for agent, workspace, orchestrator
 │   ├── providers/            # Tests for provider registry
 │   ├── services/             # Tests for workspace_service, agent_service
+│   ├── tools/                # Tests for individual tools
 │   └── api/                  # Unit tests for routers, dependencies, exception handlers
 └── functional/
     └── api/                  # End-to-end API tests (httpx AsyncClient against live app)
@@ -119,7 +120,7 @@ uv run mypy . --exclude tests      # Type-check
 
 ## Conventions
 
-- New tools: subclass `AssistantTool` in `personal_assistant/tools/`, define `name`, `description`, `args_schema` (Pydantic model), and `_run()`.
+- New tools: subclass `AssistantTool` in `personal_assistant/tools/`, define `name`, `description`, `args_schema` (Pydantic model), and `_run()`. To give a tool access to the calling agent's `AgentConfig`, add an `agent_config: AgentConfig | None = None` field — `Agent.register_tool` detects this via `model_fields` and injects a copy automatically via `model_copy`, so each agent gets its own bound instance and the original tool is never mutated.
 - New agents: subclass `Agent` or use `AgentConfig` directly with `orchestrator.create_agent()`. Use `AgentService` when calling from service/API layers.
 - New providers: subclass `AIProvider` in `personal_assistant/providers/`, implement `get_model()`, register in `main.py`.
 - New workspaces: add a factory function in `personal_assistant/workspaces/`. Use `WorkspaceService` when calling from service/API layers.

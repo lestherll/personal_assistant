@@ -34,4 +34,4 @@ class UpdateAgentRequest(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(examples=["Hello, how are you?"])

@@ -5,6 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, status
 
 from api.dependencies import get_workspace_service
+from api.routers.params import WorkspaceName
 from api.schemas import WorkspaceDetailResponse, WorkspaceResponse
 from personal_assistant.services.schemas import (
     CreateWorkspaceRequest,
@@ -36,14 +37,14 @@ def list_workspaces(service: WorkspaceServiceDep) -> list[WorkspaceResponse]:
 
 
 @router.get("/{name}", response_model=WorkspaceDetailResponse)
-def get_workspace(name: str, service: WorkspaceServiceDep) -> WorkspaceDetailResponse:
+def get_workspace(name: WorkspaceName, service: WorkspaceServiceDep) -> WorkspaceDetailResponse:
     view = service.get_workspace(name)
     return WorkspaceDetailResponse.from_view(view)
 
 
 @router.patch("/{name}", response_model=WorkspaceResponse)
 def update_workspace(
-    name: str,
+    name: WorkspaceName,
     body: UpdateWorkspaceRequest,
     service: WorkspaceServiceDep,
 ) -> WorkspaceResponse:
@@ -56,5 +57,5 @@ def update_workspace(
 
 
 @router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_workspace(name: str, service: WorkspaceServiceDep) -> None:
+def delete_workspace(name: WorkspaceName, service: WorkspaceServiceDep) -> None:
     service.delete_workspace(name)

@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_agent_service, get_db_session
+from api.routers.params import AgentName, WorkspaceName
 from api.schemas import AgentResponse, ChatResponse
 from personal_assistant.services.agent_service import AgentService
 from personal_assistant.services.schemas import (
@@ -26,7 +27,7 @@ AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
 
 @router.post("/", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
 def create_agent(
-    workspace_name: str,
+    workspace_name: WorkspaceName,
     body: CreateAgentRequest,
     service: AgentServiceDep,
 ) -> AgentResponse:
@@ -43,20 +44,22 @@ def create_agent(
 
 
 @router.get("/", response_model=list[AgentResponse])
-def list_agents(workspace_name: str, service: AgentServiceDep) -> list[AgentResponse]:
+def list_agents(workspace_name: WorkspaceName, service: AgentServiceDep) -> list[AgentResponse]:
     return [AgentResponse.from_view(v) for v in service.list_agents(workspace_name)]
 
 
 @router.get("/{agent_name}", response_model=AgentResponse)
-def get_agent(workspace_name: str, agent_name: str, service: AgentServiceDep) -> AgentResponse:
+def get_agent(
+    workspace_name: WorkspaceName, agent_name: AgentName, service: AgentServiceDep
+) -> AgentResponse:
     view = service.get_agent(workspace_name, agent_name)
     return AgentResponse.from_view(view)
 
 
 @router.patch("/{agent_name}", response_model=AgentResponse)
 def update_agent(
-    workspace_name: str,
-    agent_name: str,
+    workspace_name: WorkspaceName,
+    agent_name: AgentName,
     body: UpdateAgentRequest,
     service: AgentServiceDep,
 ) -> AgentResponse:
@@ -73,7 +76,9 @@ def update_agent(
 
 
 @router.delete("/{agent_name}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_agent(workspace_name: str, agent_name: str, service: AgentServiceDep) -> None:
+def delete_agent(
+    workspace_name: WorkspaceName, agent_name: AgentName, service: AgentServiceDep
+) -> None:
     service.delete_agent(workspace_name, agent_name)
 
 
@@ -82,8 +87,8 @@ DbSessionDep = Annotated[AsyncSession | None, Depends(get_db_session)]
 
 @router.post("/{agent_name}/chat", response_model=ChatResponse)
 async def chat(
-    workspace_name: str,
-    agent_name: str,
+    workspace_name: WorkspaceName,
+    agent_name: AgentName,
     body: ChatRequest,
     service: AgentServiceDep,
     _db: DbSessionDep,
@@ -94,8 +99,8 @@ async def chat(
 
 @router.post("/{agent_name}/chat/stream")
 async def chat_stream(
-    workspace_name: str,
-    agent_name: str,
+    workspace_name: WorkspaceName,
+    agent_name: AgentName,
     body: ChatRequest,
     service: AgentServiceDep,
     _db: DbSessionDep,
@@ -112,5 +117,7 @@ async def chat_stream(
 
 
 @router.post("/{agent_name}/reset", status_code=status.HTTP_204_NO_CONTENT)
-def reset_agent(workspace_name: str, agent_name: str, service: AgentServiceDep) -> None:
+def reset_agent(
+    workspace_name: WorkspaceName, agent_name: AgentName, service: AgentServiceDep
+) -> None:
     service.reset_agent(workspace_name, agent_name)

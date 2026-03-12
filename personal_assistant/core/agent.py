@@ -157,12 +157,17 @@ class Agent:
     def register_tool(self, tool: BaseTool) -> None:
         """Add a tool to this agent.
 
+        If the tool declares an ``agent_config`` field, a copy is created with
+        this agent's config bound to it before registration.
+
         The graph is marked dirty and will be rebuilt on the next run() call.
         """
         if self.config.allowed_tools and tool.name not in self.config.allowed_tools:
             return
         if any(t.name == tool.name for t in self._tools):
             return
+        if "agent_config" in getattr(type(tool), "model_fields", {}):
+            tool = tool.model_copy(update={"agent_config": self.config})
         self._tools.append(tool)
         self._dirty = True
 

@@ -6,10 +6,8 @@ from collections.abc import AsyncIterator
 from unittest.mock import MagicMock
 
 import httpx
-import pytest
 
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
-
 from tests.unit.api.conftest import make_agent_view
 
 _CREATE_BODY = {
@@ -67,9 +65,7 @@ async def test_create_agent_workspace_not_found_returns_404(
 async def test_create_agent_already_exists_returns_409(
     api_client: httpx.AsyncClient, mock_agent_service: MagicMock
 ) -> None:
-    mock_agent_service.create_agent.side_effect = AlreadyExistsError(
-        "agent", "Assistant"
-    )
+    mock_agent_service.create_agent.side_effect = AlreadyExistsError("agent", "Assistant")
     response = await api_client.post("/workspaces/ws1/agents/", json=_CREATE_BODY)
     assert response.status_code == 409
 
@@ -157,9 +153,7 @@ async def test_update_agent_calls_service(
     api_client: httpx.AsyncClient, mock_agent_service: MagicMock
 ) -> None:
     mock_agent_service.update_agent.return_value = make_agent_view()
-    await api_client.patch(
-        "/workspaces/ws1/agents/Assistant", json={"description": "Updated"}
-    )
+    await api_client.patch("/workspaces/ws1/agents/Assistant", json={"description": "Updated"})
     mock_agent_service.update_agent.assert_called_once_with(
         "ws1",
         "Assistant",
@@ -175,9 +169,7 @@ async def test_update_agent_not_found_returns_404(
     api_client: httpx.AsyncClient, mock_agent_service: MagicMock
 ) -> None:
     mock_agent_service.update_agent.side_effect = NotFoundError("agent", "missing")
-    response = await api_client.patch(
-        "/workspaces/ws1/agents/missing", json={"description": "x"}
-    )
+    response = await api_client.patch("/workspaces/ws1/agents/missing", json={"description": "x"})
     assert response.status_code == 404
 
 
@@ -239,9 +231,7 @@ async def test_chat_calls_service(
     api_client: httpx.AsyncClient, mock_agent_service: MagicMock
 ) -> None:
     mock_agent_service.run_agent.return_value = "Hello!"
-    await api_client.post(
-        "/workspaces/ws1/agents/Assistant/chat", json={"message": "Hi"}
-    )
+    await api_client.post("/workspaces/ws1/agents/Assistant/chat", json={"message": "Hi"})
     mock_agent_service.run_agent.assert_called_once_with("ws1", "Assistant", "Hi")
 
 
@@ -249,9 +239,7 @@ async def test_chat_agent_not_found_returns_404(
     api_client: httpx.AsyncClient, mock_agent_service: MagicMock
 ) -> None:
     mock_agent_service.run_agent.side_effect = NotFoundError("agent", "missing")
-    response = await api_client.post(
-        "/workspaces/ws1/agents/missing/chat", json={"message": "Hi"}
-    )
+    response = await api_client.post("/workspaces/ws1/agents/missing/chat", json={"message": "Hi"})
     assert response.status_code == 404
 
 
@@ -345,9 +333,7 @@ async def test_chat_stream_calls_service(
         yield "ok"
 
     mock_agent_service.stream_agent.return_value = _tokens()
-    await api_client.post(
-        "/workspaces/ws1/agents/Assistant/chat/stream", json={"message": "Hi"}
-    )
+    await api_client.post("/workspaces/ws1/agents/Assistant/chat/stream", json={"message": "Hi"})
     mock_agent_service.stream_agent.assert_called_once_with("ws1", "Assistant", "Hi")
 
 

@@ -5,15 +5,12 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import httpx
-import pytest
 
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
-
 from tests.unit.api.conftest import (
     make_workspace_detail_view,
     make_workspace_view,
 )
-
 
 # ---------------------------------------------------------------------------
 # POST /workspaces/ — create
@@ -46,9 +43,7 @@ async def test_create_workspace_calls_service(
     api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
 ) -> None:
     mock_workspace_service.create_workspace.return_value = make_workspace_view()
-    await api_client.post(
-        "/workspaces/", json={"name": "ws1", "description": "A workspace"}
-    )
+    await api_client.post("/workspaces/", json={"name": "ws1", "description": "A workspace"})
     mock_workspace_service.create_workspace.assert_called_once_with(
         name="ws1", description="A workspace", metadata={}
     )
@@ -57,9 +52,7 @@ async def test_create_workspace_calls_service(
 async def test_create_workspace_already_exists_returns_409(
     api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
 ) -> None:
-    mock_workspace_service.create_workspace.side_effect = AlreadyExistsError(
-        "workspace", "ws1"
-    )
+    mock_workspace_service.create_workspace.side_effect = AlreadyExistsError("workspace", "ws1")
     response = await api_client.post(
         "/workspaces/", json={"name": "ws1", "description": "A workspace"}
     )
@@ -127,9 +120,7 @@ async def test_get_workspace_detail_includes_agents(
 async def test_get_workspace_not_found_returns_404(
     api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
 ) -> None:
-    mock_workspace_service.get_workspace.side_effect = NotFoundError(
-        "workspace", "missing"
-    )
+    mock_workspace_service.get_workspace.side_effect = NotFoundError("workspace", "missing")
     response = await api_client.get("/workspaces/missing")
     assert response.status_code == 404
 
@@ -145,9 +136,7 @@ async def test_update_workspace_returns_200(
     mock_workspace_service.update_workspace.return_value = make_workspace_view(
         description="Updated"
     )
-    response = await api_client.patch(
-        "/workspaces/ws1", json={"description": "Updated"}
-    )
+    response = await api_client.patch("/workspaces/ws1", json={"description": "Updated"})
     assert response.status_code == 200
 
 
@@ -157,21 +146,15 @@ async def test_update_workspace_returns_updated_body(
     mock_workspace_service.update_workspace.return_value = make_workspace_view(
         description="Updated"
     )
-    response = await api_client.patch(
-        "/workspaces/ws1", json={"description": "Updated"}
-    )
+    response = await api_client.patch("/workspaces/ws1", json={"description": "Updated"})
     assert response.json()["description"] == "Updated"
 
 
 async def test_update_workspace_not_found_returns_404(
     api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
 ) -> None:
-    mock_workspace_service.update_workspace.side_effect = NotFoundError(
-        "workspace", "missing"
-    )
-    response = await api_client.patch(
-        "/workspaces/missing", json={"description": "x"}
-    )
+    mock_workspace_service.update_workspace.side_effect = NotFoundError("workspace", "missing")
+    response = await api_client.patch("/workspaces/missing", json={"description": "x"})
     assert response.status_code == 404
 
 
@@ -199,8 +182,6 @@ async def test_delete_workspace_calls_service(
 async def test_delete_workspace_not_found_returns_404(
     api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
 ) -> None:
-    mock_workspace_service.delete_workspace.side_effect = NotFoundError(
-        "workspace", "missing"
-    )
+    mock_workspace_service.delete_workspace.side_effect = NotFoundError("workspace", "missing")
     response = await api_client.delete("/workspaces/missing")
     assert response.status_code == 404

@@ -11,6 +11,9 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport
 
+from api.dependencies import get_agent_service, get_db_session, get_workspace_service
+from api.exception_handlers import register_exception_handlers
+from api.routers import agents, workspaces
 from personal_assistant.services.views import (
     AgentConfigView,
     AgentView,
@@ -18,19 +21,14 @@ from personal_assistant.services.views import (
     WorkspaceView,
 )
 
-from api.dependencies import get_agent_service, get_db_session, get_workspace_service
-from api.exception_handlers import register_exception_handlers
-from api.routers import agents, workspaces
-
-
 # ---------------------------------------------------------------------------
 # View builders (shared across router test modules)
 # ---------------------------------------------------------------------------
 
 
 def make_agent_view(name: str = "Assistant", **overrides: Any) -> AgentView:
-    defaults: dict[str, Any] = dict(
-        config=AgentConfigView(
+    defaults: dict[str, Any] = {
+        "config": AgentConfigView(
             name=name,
             description="General agent",
             system_prompt="You are helpful.",
@@ -38,21 +36,21 @@ def make_agent_view(name: str = "Assistant", **overrides: Any) -> AgentView:
             model="qwen2.5:14b",
             allowed_tools=[],
         ),
-        tools=[],
-        llm_info={"provider": "ollama", "model": "qwen2.5:14b", "source": "registry"},
-    )
+        "tools": [],
+        "llm_info": {"provider": "ollama", "model": "qwen2.5:14b", "source": "registry"},
+    }
     defaults.update(overrides)
     return AgentView(**defaults)
 
 
 def make_workspace_view(name: str = "ws1", **overrides: Any) -> WorkspaceView:
-    defaults: dict[str, Any] = dict(
-        name=name,
-        description="A workspace",
-        metadata={},
-        agents=[],
-        tools=[],
-    )
+    defaults: dict[str, Any] = {
+        "name": name,
+        "description": "A workspace",
+        "metadata": {},
+        "agents": [],
+        "tools": [],
+    }
     defaults.update(overrides)
     return WorkspaceView(**defaults)
 
