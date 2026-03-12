@@ -67,7 +67,7 @@ class ConversationRepository:
             conversation_id=conversation_id,
             role=role,
             content=content,
-            metadata=metadata,
+            extra_metadata=metadata,
         )
         self._session.add(msg)
         await self._session.commit()
