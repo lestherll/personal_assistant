@@ -1,12 +1,10 @@
-from unittest.mock import patch
-
 import pytest
 
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
 from personal_assistant.services.views import WorkspaceDetailView, WorkspaceView
 from personal_assistant.services.workspace_service import WorkspaceService
-from tests.unit.conftest import make_mock_graph, make_mock_provider
+from tests.unit.conftest import make_mock_provider
 from tests.unit.core.test_workspace import make_mock_agent
 
 

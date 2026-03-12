@@ -20,7 +20,7 @@ async def main() -> None:
     # --- Provider registry ---
     registry = ProviderRegistry()
     registry.register(AnthropicProvider())
-    registry.register(OllamaProvider(OllamaConfig(default_model="qwen3:8b")), default=True)
+    registry.register(OllamaProvider(OllamaConfig(default_model="qwen2.5:14b")), default=True)
 
     # --- Orchestrator + default workspace ---
     orchestrator = Orchestrator(registry)

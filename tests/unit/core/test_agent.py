@@ -12,42 +12,42 @@ def make_tool(name: str = "test_tool") -> BaseTool:
 
 
 class TestAgentCreation:
-    def test_agent_resolves_llm_from_registry(self, agent_config, mock_graph):
+    def test_agent_resolves_llm_from_registry(self, agent_config, mock_graph) -> None:
         registry = MagicMock()
         registry.get.return_value.get_model.return_value = MagicMock()
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
             Agent(agent_config, registry)
         registry.get.assert_called_with(agent_config.provider)
 
-    def test_agent_starts_with_empty_history(self, agent):
+    def test_agent_starts_with_empty_history(self, agent) -> None:
         assert agent.history == []
 
-    def test_agent_starts_with_no_tools(self, agent):
+    def test_agent_starts_with_no_tools(self, agent) -> None:
         assert agent.tools == []
 
 
 class TestToolManagement:
-    def test_register_tool(self, agent, mock_graph):
+    def test_register_tool(self, agent, mock_graph) -> None:
         tool = make_tool("weather")
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
             agent.register_tool(tool)
         assert "weather" in agent.tools
 
-    def test_register_duplicate_tool_ignored(self, agent, mock_graph):
+    def test_register_duplicate_tool_ignored(self, agent, mock_graph) -> None:
         tool = make_tool("weather")
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
             agent.register_tool(tool)
             agent.register_tool(tool)
         assert agent.tools.count("weather") == 1
 
-    def test_remove_tool(self, agent, mock_graph):
+    def test_remove_tool(self, agent, mock_graph) -> None:
         tool = make_tool("weather")
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
             agent.register_tool(tool)
             agent.remove_tool("weather")
         assert "weather" not in agent.tools
 
-    def test_allowed_tools_filters_registration(self, mock_registry, mock_graph):
+    def test_allowed_tools_filters_registration(self, mock_registry, mock_graph) -> None:
         config = AgentConfig(
             name="Restricted",
             description="Restricted agent",
@@ -61,7 +61,7 @@ class TestToolManagement:
         assert "allowed_tool" in agent.tools
         assert "blocked_tool" not in agent.tools
 
-    def test_empty_allowed_tools_accepts_all(self, agent, mock_graph):
+    def test_empty_allowed_tools_accepts_all(self, agent, mock_graph) -> None:
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
             agent.register_tool(make_tool("tool_a"))
             agent.register_tool(make_tool("tool_b"))
@@ -70,21 +70,21 @@ class TestToolManagement:
 
 
 class TestRunAndHistory:
-    async def test_run_returns_last_message_content(self, agent):
+    async def test_run_returns_last_message_content(self, agent) -> None:
         response = await agent.run("Hello")
         assert response == "Test response"
 
-    async def test_run_appends_to_history(self, agent):
+    async def test_run_appends_to_history(self, agent) -> None:
         await agent.run("Hello")
         assert len(agent.history) > 0
 
-    async def test_run_accumulates_history_across_turns(self, agent):
+    async def test_run_accumulates_history_across_turns(self, agent) -> None:
         await agent.run("First message")
         first_len = len(agent.history)
         await agent.run("Second message")
         assert len(agent.history) > first_len
 
-    async def test_run_passes_full_history_to_graph(self, agent):
+    async def test_run_passes_full_history_to_graph(self, agent) -> None:
         await agent.run("First message")
         await agent.run("Second message")
         # Second invoke should receive more messages than the first
@@ -94,12 +94,12 @@ class TestRunAndHistory:
 
 
 class TestReset:
-    async def test_reset_clears_history(self, agent):
+    async def test_reset_clears_history(self, agent) -> None:
         await agent.run("Hello")
         agent.reset()
         assert agent.history == []
 
-    async def test_run_after_reset_starts_fresh(self, agent):
+    async def test_run_after_reset_starts_fresh(self, agent) -> None:
         await agent.run("Hello")
         agent.reset()
         await agent.run("Hello again")
@@ -109,11 +109,11 @@ class TestReset:
 
 
 class TestStream:
-    async def test_stream_yields_messages(self, agent):
+    async def test_stream_yields_messages(self, agent) -> None:
         messages = [msg async for msg in agent.stream("Hello")]
         assert len(messages) > 0
 
-    async def test_stream_updates_history(self, agent):
+    async def test_stream_updates_history(self, agent) -> None:
         async for _ in agent.stream("Hello"):
             pass
         assert len(agent.history) > 0
@@ -122,14 +122,14 @@ class TestStream:
 class TestAgentFactoryMethods:
     """Tests for Agent factory methods."""
 
-    def test_from_config_creates_agent(self, agent_config, mock_registry, mock_graph):
+    def test_from_config_creates_agent(self, agent_config, mock_registry, mock_graph) -> None:
         """Test that from_config creates an agent with registry."""
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
             agent = Agent.from_config(agent_config, mock_registry)
         assert agent.config == agent_config
         assert agent._registry == mock_registry
 
-    def test_from_llm_creates_agent(self, agent_config, mock_graph):
+    def test_from_llm_creates_agent(self, agent_config, mock_graph) -> None:
         """Test that from_llm creates an agent with direct LLM."""
         from langchain_core.language_models import BaseChatModel
 
@@ -144,20 +144,20 @@ class TestAgentFactoryMethods:
 class TestAgentConstructorValidation:
     """Tests for Agent constructor validation."""
 
-    def test_requires_registry_or_llm(self, agent_config):
+    def test_requires_registry_or_llm(self, agent_config) -> None:
         """Test that Agent requires either registry or llm."""
         import pytest
 
         with pytest.raises(ValueError, match="Either 'registry' or 'llm' must be provided"):
             Agent(agent_config)
 
-    def test_accepts_registry(self, agent_config, mock_registry, mock_graph):
+    def test_accepts_registry(self, agent_config, mock_registry, mock_graph) -> None:
         """Test that Agent accepts registry parameter."""
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
             agent = Agent(agent_config, registry=mock_registry)
         assert agent._registry == mock_registry
 
-    def test_accepts_llm(self, agent_config, mock_graph):
+    def test_accepts_llm(self, agent_config, mock_graph) -> None:
         """Test that Agent accepts llm parameter."""
         from langchain_core.language_models import BaseChatModel
 
@@ -170,14 +170,14 @@ class TestAgentConstructorValidation:
 class TestDeferredGraphRebuild:
     """Tests for deferred graph rebuild behavior."""
 
-    def test_register_tool_sets_dirty_flag(self, agent):
+    def test_register_tool_sets_dirty_flag(self, agent) -> None:
         """Test that register_tool sets the dirty flag."""
         tool = make_tool("new_tool")
         agent._dirty = False
         agent.register_tool(tool)
         assert agent._dirty is True
 
-    def test_remove_tool_sets_dirty_flag(self, agent):
+    def test_remove_tool_sets_dirty_flag(self, agent) -> None:
         """Test that remove_tool sets the dirty flag."""
         tool = make_tool("existing")
         agent._tools.append(tool)
@@ -185,7 +185,7 @@ class TestDeferredGraphRebuild:
         agent.remove_tool("existing")
         assert agent._dirty is True
 
-    def test_ensure_graph_rebuilds_when_dirty(self, agent, mock_graph):
+    def test_ensure_graph_rebuilds_when_dirty(self, agent, mock_graph) -> None:
         """Test that _ensure_graph rebuilds graph when dirty."""
         agent._dirty = True
         new_graph = MagicMock()
@@ -194,7 +194,7 @@ class TestDeferredGraphRebuild:
         assert agent._graph == new_graph
         assert agent._dirty is False
 
-    def test_ensure_graph_skips_when_clean(self, agent, mock_graph):
+    def test_ensure_graph_skips_when_clean(self, agent, mock_graph) -> None:
         """Test that _ensure_graph skips rebuild when not dirty."""
         original_graph = agent._graph
         agent._dirty = False
@@ -205,7 +205,9 @@ class TestDeferredGraphRebuild:
 class TestGetLlmInfo:
     """Tests for Agent.get_llm_info()."""
 
-    def test_registry_path_returns_config_values(self, agent_config, mock_registry, mock_graph):
+    def test_registry_path_returns_config_values(
+        self, agent_config, mock_registry, mock_graph
+    ) -> None:
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
             agent = Agent(agent_config, mock_registry)
         info = agent.get_llm_info()
@@ -213,7 +215,7 @@ class TestGetLlmInfo:
         assert info["provider"] == agent_config.provider
         assert info["model"] == agent_config.model
 
-    def test_direct_llm_path_returns_class_name(self, agent_config, mock_graph):
+    def test_direct_llm_path_returns_class_name(self, agent_config, mock_graph) -> None:
         from langchain_core.language_models import BaseChatModel
 
         mock_llm = MagicMock(spec=BaseChatModel)
@@ -229,7 +231,7 @@ class TestGetLlmInfo:
 class TestSetLlm:
     """Tests for Agent.set_llm()."""
 
-    def test_set_llm_replaces_llm(self, agent_config, mock_registry, mock_graph):
+    def test_set_llm_replaces_llm(self, agent_config, mock_registry, mock_graph) -> None:
         from langchain_core.language_models import BaseChatModel
 
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
@@ -238,7 +240,7 @@ class TestSetLlm:
             agent.set_llm(new_llm)
         assert agent._llm is new_llm
 
-    def test_set_llm_clears_registry(self, agent_config, mock_registry, mock_graph):
+    def test_set_llm_clears_registry(self, agent_config, mock_registry, mock_graph) -> None:
         from langchain_core.language_models import BaseChatModel
 
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
@@ -246,7 +248,7 @@ class TestSetLlm:
             agent.set_llm(MagicMock(spec=BaseChatModel))
         assert agent._registry is None
 
-    def test_set_llm_rebuilds_graph(self, agent_config, mock_registry, mock_graph):
+    def test_set_llm_rebuilds_graph(self, agent_config, mock_registry, mock_graph) -> None:
         from langchain_core.language_models import BaseChatModel
 
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
@@ -262,7 +264,7 @@ class TestSetLlm:
 class TestBatchTools:
     """Tests for batch_tools context manager."""
 
-    def test_batch_tools_defers_rebuild(self, agent, mock_graph):
+    def test_batch_tools_defers_rebuild(self, agent, mock_graph) -> None:
         """Test that batch_tools defers graph rebuild until exit."""
         tool1 = make_tool("tool1")
         tool2 = make_tool("tool2")
@@ -283,7 +285,7 @@ class TestBatchTools:
             assert agent._graph == new_graph
             assert agent._dirty is False
 
-    def test_batch_tools_with_single_tool(self, agent, mock_graph):
+    def test_batch_tools_with_single_tool(self, agent, mock_graph) -> None:
         """Test batch_tools with a single tool addition."""
         tool = make_tool("single_tool")
         new_graph = MagicMock()

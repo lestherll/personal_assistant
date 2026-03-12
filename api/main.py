@@ -1,0 +1,57 @@
+from __future__ import annotations
+
+import os
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI
+
+from api.exception_handlers import register_exception_handlers
+from api.routers import agents, workspaces
+from personal_assistant.core.orchestrator import Orchestrator
+from personal_assistant.persistence.database import build_engine, build_session_factory
+from personal_assistant.providers import (
+    AnthropicProvider,
+    OllamaConfig,
+    OllamaProvider,
+    ProviderRegistry,
+)
+from personal_assistant.workspaces.default_workspace import create_default_workspace
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # --- Provider registry ---
+    registry = ProviderRegistry()
+    registry.register(AnthropicProvider())
+    registry.register(OllamaProvider(OllamaConfig(default_model="qwen2.5:14b")), default=True)
+
+    # --- Orchestrator + default workspace ---
+    orchestrator = Orchestrator(registry)
+    create_default_workspace(orchestrator)
+    app.state.orchestrator = orchestrator
+
+    # --- Persistence (optional) ---
+    engine = None
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        engine = build_engine(database_url)
+        app.state.session_factory = build_session_factory(engine)
+    else:
+        app.state.session_factory = None
+
+    yield
+
+    if engine is not None:
+        await engine.dispose()
+
+
+app = FastAPI(title="Personal Assistant API", version="0.1.0", lifespan=lifespan)
+register_exception_handlers(app)
+app.include_router(workspaces.router)
+app.include_router(agents.router)
+
+
+@app.get("/health")
+async def health() -> dict[str, str]:
+    return {"status": "ok"}

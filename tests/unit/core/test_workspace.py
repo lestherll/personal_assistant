@@ -25,7 +25,7 @@ def make_mock_tool(name: str = "test_tool") -> BaseTool:
 
 
 @pytest.fixture
-def workspace():
+def workspace() -> Workspace:
     return Workspace(WorkspaceConfig(name="test", description="Test workspace"))
 
 

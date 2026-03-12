@@ -14,11 +14,13 @@ A modular AI personal assistant built on LangChain and LangGraph. The core conce
 - **pydantic v2** — tool input schemas + request/response schemas
 - **SQLAlchemy 2 (async)** + **asyncpg** — optional PostgreSQL persistence
 - **alembic** — database migrations
+- **FastAPI** — REST API layer
 
 ### Dev tooling
 - **ruff** — linting + formatting (`uv run ruff check .` / `uv run ruff format .`)
-- **mypy** — static type checking in strict mode (`uv run mypy .`)
-- **pytest** + **pytest-mock** + **pytest-asyncio** — unit tests (`uv run pytest`)
+- **mypy** — static type checking in strict mode (`uv run mypy . --exclude tests`)
+- **pytest** + **pytest-mock** + **pytest-asyncio** — unit + functional tests (`uv run pytest`)
+- **httpx** — async HTTP client used in API tests
 
 ## Project Structure
 
@@ -50,13 +52,24 @@ personal_assistant/
     ├── schemas.py            # Pydantic request models (Create/Update/Chat)
     ├── views.py              # Dataclass response views (AgentView, WorkspaceView, …)
     └── exceptions.py         # NotFoundError, AlreadyExistsError, ServiceValidationError
+api/
+├── main.py               # FastAPI app — lifespan bootstrap, router registration
+├── dependencies.py       # FastAPI dependency injection (orchestrator, session factory)
+├── exception_handlers.py # Maps service exceptions to HTTP responses
+├── schemas.py            # API-level Pydantic request/response schemas
+└── routers/
+    ├── agents.py         # /agents/** endpoints
+    └── workspaces.py     # /workspaces/** endpoints
 tests/
-└── unit/
-    ├── conftest.py           # Shared fixtures
-    ├── core/                 # Tests for agent, workspace, orchestrator
-    ├── providers/            # Tests for provider registry
-    └── services/             # Tests for workspace_service, agent_service
-main.py                       # Entry point — bootstraps registry, orchestrator, REPL
+├── unit/
+│   ├── conftest.py           # Shared fixtures
+│   ├── core/                 # Tests for agent, workspace, orchestrator
+│   ├── providers/            # Tests for provider registry
+│   ├── services/             # Tests for workspace_service, agent_service
+│   └── api/                  # Unit tests for routers, dependencies, exception handlers
+└── functional/
+    └── api/                  # End-to-end API tests (httpx AsyncClient against live app)
+main.py                       # REPL entry point — bootstraps registry, orchestrator
 ```
 
 ## Key Concepts
@@ -76,6 +89,9 @@ Owns the `ProviderRegistry` and all workspaces. Routes tasks via `delegate(task,
 ### Services
 Thin business-logic layer sitting above the core. `WorkspaceService` and `AgentService` wrap the orchestrator with CRUD operations and raise typed exceptions (`NotFoundError`, `AlreadyExistsError`). Pydantic schemas in `schemas.py` describe request payloads; dataclass views in `views.py` describe responses.
 
+### REST API
+FastAPI app in `api/`. Routers for `/workspaces` and `/agents` delegate to `WorkspaceService` / `AgentService`. Dependencies in `api/dependencies.py` inject the orchestrator and optional session factory from `app.state`. Exception handlers in `api/exception_handlers.py` convert service exceptions to appropriate HTTP status codes. Start with `uv run fastapi dev api/main.py`.
+
 ### Persistence (optional)
 Async SQLAlchemy + asyncpg backed by PostgreSQL. `Conversation` and `Message` ORM models live in `persistence/models.py`. `ConversationRepository` handles all DB access. Set `DATABASE_URL` to enable; omit it to run in-memory only. Use Alembic for migrations.
 
@@ -92,12 +108,13 @@ Ollama runs locally at `http://localhost:11434`. Pull models with `ollama pull <
 ## Commands
 
 ```bash
-uv run python main.py        # Start the REPL
-uv add <package>             # Add a dependency
-uv run pytest                # Run tests
-uv run ruff check .          # Lint
-uv run ruff format .         # Format
-uv run mypy .                # Type-check
+uv run python main.py              # Start the REPL
+uv run fastapi dev api/main.py     # Start the REST API (dev mode)
+uv add <package>                   # Add a dependency
+uv run pytest                      # Run all tests (unit + functional)
+uv run ruff check .                # Lint
+uv run ruff format .               # Format
+uv run mypy . --exclude tests      # Type-check
 ```
 
 ## Conventions
@@ -106,6 +123,7 @@ uv run mypy .                # Type-check
 - New agents: subclass `Agent` or use `AgentConfig` directly with `orchestrator.create_agent()`. Use `AgentService` when calling from service/API layers.
 - New providers: subclass `AIProvider` in `personal_assistant/providers/`, implement `get_model()`, register in `main.py`.
 - New workspaces: add a factory function in `personal_assistant/workspaces/`. Use `WorkspaceService` when calling from service/API layers.
+- New API endpoints: add a router in `api/routers/`, include it in `api/main.py`, and add any new service exceptions to `api/exception_handlers.py`.
 - Do not hardcode API keys — always use `.env`.
 - Agent conversation history persists per agent instance. Call `agent.reset()` or `AgentService.reset_agent()` to clear.
 - `DATABASE_URL` is optional. When absent, the app runs fully in-memory with no persistence.

@@ -4,9 +4,9 @@ import asyncio
 import os
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from alembic import context
 from personal_assistant.persistence.models import Base
 
 # Alembic Config object — gives access to alembic.ini values

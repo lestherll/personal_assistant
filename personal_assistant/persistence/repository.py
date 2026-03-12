@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,7 +39,7 @@ class ConversationRepository:
         """Bump the updated_at timestamp of a conversation."""
         conv = await self.get_conversation(conversation_id)
         if conv:
-            conv.updated_at = datetime.now(timezone.utc)
+            conv.updated_at = datetime.now(UTC)
             await self._session.commit()
 
     # ------------------------------------------------------------------
@@ -60,7 +60,7 @@ class ConversationRepository:
         conversation_id: uuid.UUID,
         role: str,
         content: str,
-        metadata: dict | None = None,
+        metadata: dict[str, object] | None = None,
     ) -> Message:
         """Insert a new message row and return it."""
         msg = Message(
