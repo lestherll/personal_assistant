@@ -71,6 +71,40 @@ class Workspace:
         return list(self._tools.keys())
 
     # ------------------------------------------------------------------
+    # Selective tool assignment (agent-specific tools)
+    # ------------------------------------------------------------------
+
+    def add_tool_to_agent(self, agent_name: str, tool: BaseTool) -> None:
+        """Add a tool to a specific agent only (not to all workspace agents).
+
+        Args:
+            agent_name: Name of the agent to add the tool to.
+            tool: The tool to add.
+
+        Raises:
+            KeyError: If no agent with the given name exists.
+        """
+        agent = self._agents.get(agent_name)
+        if agent is None:
+            raise KeyError(f"No agent named '{agent_name}' in workspace")
+        agent.register_tool(tool)
+
+    def remove_tool_from_agent(self, agent_name: str, tool_name: str) -> None:
+        """Remove a tool from a specific agent only.
+
+        Args:
+            agent_name: Name of the agent to remove the tool from.
+            tool_name: Name of the tool to remove.
+
+        Raises:
+            KeyError: If no agent with the given name exists.
+        """
+        agent = self._agents.get(agent_name)
+        if agent is None:
+            raise KeyError(f"No agent named '{agent_name}' in workspace")
+        agent.remove_tool(tool_name)
+
+    # ------------------------------------------------------------------
     # Repr
     # ------------------------------------------------------------------
 

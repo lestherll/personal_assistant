@@ -107,3 +107,65 @@ class TestToolManagement:
         workspace.add_tool(make_mock_tool("a"))
         workspace.add_tool(make_mock_tool("b"))
         assert workspace.list_tools() == ["a", "b"]
+
+
+class TestSelectiveToolAssignment:
+    def test_add_tool_to_agent_specific_agent_only(self, workspace):
+        """Test that add_tool_to_agent only adds to the specified agent."""
+        agent_a = make_mock_agent("AgentA")
+        agent_b = make_mock_agent("AgentB")
+        workspace.add_agent(agent_a)
+        workspace.add_agent(agent_b)
+
+        tool = make_mock_tool("special_tool")
+        workspace.add_tool_to_agent("AgentA", tool)
+
+        # AgentA should have the tool registered
+        agent_a.register_tool.assert_called_with(tool)
+        # AgentB should NOT have been called with this tool
+        agent_b.register_tool.assert_not_called()
+
+    def test_add_tool_to_agent_nonexistent_raises(self, workspace):
+        """Test that add_tool_to_agent raises for nonexistent agent."""
+        tool = make_mock_tool("tool")
+        with pytest.raises(KeyError, match="No agent named 'Ghost'"):
+            workspace.add_tool_to_agent("Ghost", tool)
+
+    def test_remove_tool_from_agent_specific_agent_only(self, workspace):
+        """Test that remove_tool_from_agent only removes from specified agent."""
+        agent_a = make_mock_agent("AgentA")
+        agent_b = make_mock_agent("AgentB")
+        workspace.add_agent(agent_a)
+        workspace.add_agent(agent_b)
+
+        # First add a tool to both agents via workspace
+        tool = make_mock_tool("shared_tool")
+        workspace.add_tool(tool)
+
+        # Reset mock call counts
+        agent_a.reset_mock()
+        agent_b.reset_mock()
+
+        # Now remove from AgentA only
+        workspace.remove_tool_from_agent("AgentA", "shared_tool")
+
+        # AgentA should have the tool removed
+        agent_a.remove_tool.assert_called_with("shared_tool")
+        # AgentB should NOT have been called
+        agent_b.remove_tool.assert_not_called()
+
+    def test_remove_tool_from_agent_nonexistent_raises(self, workspace):
+        """Test that remove_tool_from_agent raises for nonexistent agent."""
+        with pytest.raises(KeyError, match="No agent named 'Ghost'"):
+            workspace.remove_tool_from_agent("Ghost", "tool")
+
+    def test_selective_tool_does_not_affect_workspace_tools(self, workspace):
+        """Test that selective tool assignment doesn't add to workspace tools."""
+        agent = make_mock_agent("Agent")
+        workspace.add_agent(agent)
+
+        tool = make_mock_tool("private_tool")
+        workspace.add_tool_to_agent("Agent", tool)
+
+        # Tool should NOT be in workspace tools
+        assert "private_tool" not in workspace.list_tools()

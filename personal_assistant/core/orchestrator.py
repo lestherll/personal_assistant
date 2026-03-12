@@ -109,6 +109,22 @@ class Orchestrator:
         workspace.replace_agent(agent)
         return agent
 
+    def create_standalone_agent(self, config: AgentConfig) -> Agent:
+        """Create an agent without adding it to any workspace.
+
+        This is useful for one-off agents that don't need to be managed
+        within a workspace context.
+
+        Args:
+            config: AgentConfig describing the agent's name, prompt, provider, etc.
+
+        Returns:
+            A standalone Agent instance.
+        """
+        from personal_assistant.core.agent import Agent
+
+        return Agent(config, self.registry)
+
     # ------------------------------------------------------------------
     # Task delegation
     # ------------------------------------------------------------------
