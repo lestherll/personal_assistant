@@ -77,6 +77,10 @@ class Workspace:
     def add_tool_to_agent(self, agent_name: str, tool: BaseTool) -> None:
         """Add a tool to a specific agent only (not to all workspace agents).
 
+        Note: tools added this way are NOT tracked in the workspace tool registry
+        and will NOT appear in list_tools(). They are agent-private tools.
+        Use add_tool() instead if you want the tool to be shared across all agents.
+
         Args:
             agent_name: Name of the agent to add the tool to.
             tool: The tool to add.

@@ -4,7 +4,6 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
-from uuid import UUID, uuid4
 
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage
@@ -74,7 +73,7 @@ class Agent:
         if llm is not None:
             self._llm = llm
         else:
-            # registry is guaranteed non-None by the check above
+            assert registry is not None  # guaranteed by the check above
             self._llm = registry.get(config.provider).get_model(config.model)
 
         self._graph: Any = self._build_graph()
@@ -167,7 +166,8 @@ class Agent:
         """Context manager for batch tool operations.
 
         Defers graph rebuild until the context exits, improving efficiency
-        when adding/removing multiple tools.
+        when adding/removing multiple tools. The graph is always rebuilt on
+        exit, even if an exception is raised inside the block.
 
         Example:
             with agent.batch_tools():
@@ -176,12 +176,50 @@ class Agent:
                 agent.remove_tool("old_tool")
             # Graph is rebuilt once here
         """
-        yield
-        self.rebuild_graph()
+        try:
+            yield
+        finally:
+            self.rebuild_graph()
 
     @property
     def tools(self) -> list[str]:
         return [t.name for t in self._tools]
+
+    def get_llm_info(self) -> dict[str, str | None]:
+        """Return information about the underlying LLM regardless of creation path.
+
+        When created via registry, returns the configured provider and model names.
+        When created via from_llm(), infers the class name and model attribute from
+        the LLM instance, since no provider/model strings were provided at construction.
+
+        Returns:
+            A dict with keys 'provider', 'model', and 'source' ('registry' or 'direct').
+        """
+        if self._registry is not None:
+            return {
+                "provider": self.config.provider,
+                "model": self.config.model,
+                "source": "registry",
+            }
+        model_attr = getattr(self._llm, "model_name", None) or getattr(self._llm, "model", None)
+        return {
+            "provider": type(self._llm).__name__,
+            "model": model_attr,
+            "source": "direct",
+        }
+
+    def set_llm(self, llm: BaseChatModel) -> None:
+        """Swap the underlying LLM and rebuild the graph immediately.
+
+        Useful for hot-swapping providers on standalone agents at runtime.
+        After calling this, the agent no longer references a ProviderRegistry.
+
+        Args:
+            llm: The new LLM instance to use.
+        """
+        self._llm = llm
+        self._registry = None
+        self._graph = self._build_graph()
 
     def run(self, task: str) -> str:
         """Run a task and return the agent's final text response.

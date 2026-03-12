@@ -146,6 +146,7 @@ class TestAgentConstructorValidation:
     def test_requires_registry_or_llm(self, agent_config):
         """Test that Agent requires either registry or llm."""
         import pytest
+
         with pytest.raises(ValueError, match="Either 'registry' or 'llm' must be provided"):
             Agent(agent_config)
 
@@ -198,6 +199,63 @@ class TestDeferredGraphRebuild:
         agent._dirty = False
         agent._ensure_graph()
         assert agent._graph is original_graph
+
+
+class TestGetLlmInfo:
+    """Tests for Agent.get_llm_info()."""
+
+    def test_registry_path_returns_config_values(self, agent_config, mock_registry, mock_graph):
+        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+            agent = Agent(agent_config, mock_registry)
+        info = agent.get_llm_info()
+        assert info["source"] == "registry"
+        assert info["provider"] == agent_config.provider
+        assert info["model"] == agent_config.model
+
+    def test_direct_llm_path_returns_class_name(self, agent_config, mock_graph):
+        from langchain_core.language_models import BaseChatModel
+
+        mock_llm = MagicMock(spec=BaseChatModel)
+        mock_llm.model = "test-model"
+        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+            agent = Agent.from_llm(agent_config, mock_llm)
+        info = agent.get_llm_info()
+        assert info["source"] == "direct"
+        assert info["provider"] == type(mock_llm).__name__
+        assert info["model"] == "test-model"
+
+
+class TestSetLlm:
+    """Tests for Agent.set_llm()."""
+
+    def test_set_llm_replaces_llm(self, agent_config, mock_registry, mock_graph):
+        from langchain_core.language_models import BaseChatModel
+
+        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+            agent = Agent(agent_config, mock_registry)
+            new_llm = MagicMock(spec=BaseChatModel)
+            agent.set_llm(new_llm)
+        assert agent._llm is new_llm
+
+    def test_set_llm_clears_registry(self, agent_config, mock_registry, mock_graph):
+        from langchain_core.language_models import BaseChatModel
+
+        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+            agent = Agent(agent_config, mock_registry)
+            agent.set_llm(MagicMock(spec=BaseChatModel))
+        assert agent._registry is None
+
+    def test_set_llm_rebuilds_graph(self, agent_config, mock_registry, mock_graph):
+        from langchain_core.language_models import BaseChatModel
+
+        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+            agent = Agent(agent_config, mock_registry)
+            original_graph = agent._graph
+            new_graph = MagicMock()
+            with patch("personal_assistant.core.agent.create_react_agent", return_value=new_graph):
+                agent.set_llm(MagicMock(spec=BaseChatModel))
+        assert agent._graph is new_graph
+        assert agent._graph is not original_graph
 
 
 class TestBatchTools:

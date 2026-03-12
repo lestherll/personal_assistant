@@ -136,42 +136,42 @@ class TestAgentHelpers:
             orchestrator.create_agent(config)
 
 
-class TestStandaloneAgent:
-    def test_create_standalone_agent_returns_agent(self, orchestrator):
-        """Test that create_standalone_agent returns an Agent instance."""
-        config = AgentConfig(name="StandaloneBot", description="A standalone agent", system_prompt="Be helpful.")
+class TestUnmanagedAgent:
+    def test_create_unmanaged_agent_returns_agent(self, orchestrator):
+        """Test that create_unmanaged_agent returns an Agent instance."""
+        config = AgentConfig(name="StandaloneBot", description="", system_prompt="Be helpful.")
         mock = make_mock_graph()
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
-            agent = orchestrator.create_standalone_agent(config)
+            agent = orchestrator.create_unmanaged_agent(config)
         assert agent is not None
         assert agent.config.name == "StandaloneBot"
 
-    def test_create_standalone_agent_not_in_workspace(self, orchestrator, workspace_config):
-        """Test that standalone agent is not added to any workspace."""
+    def test_create_unmanaged_agent_not_in_workspace(self, orchestrator, workspace_config):
+        """Test that unmanaged agent is not added to any workspace."""
         orchestrator.create_workspace(workspace_config)
-        config = AgentConfig(name="LonelyBot", description="A standalone agent", system_prompt="Be helpful.")
+        config = AgentConfig(name="LonelyBot", description="", system_prompt="Be helpful.")
         mock = make_mock_graph()
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
-            agent = orchestrator.create_standalone_agent(config)
+            orchestrator.create_unmanaged_agent(config)
         # Agent should exist but not be in the active workspace
         assert orchestrator.active_workspace is not None
         assert "LonelyBot" not in orchestrator.active_workspace.list_agents()
 
-    def test_create_standalone_agent_no_workspace_required(self, orchestrator):
-        """Test that standalone agent can be created without any workspace."""
-        config = AgentConfig(name="IndependentBot", description="A standalone agent", system_prompt="Be helpful.")
+    def test_create_unmanaged_agent_no_workspace_required(self, orchestrator):
+        """Test that unmanaged agent can be created without any workspace."""
+        config = AgentConfig(name="IndependentBot", description="", system_prompt="Be helpful.")
         mock = make_mock_graph()
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
-            agent = orchestrator.create_standalone_agent(config)
+            agent = orchestrator.create_unmanaged_agent(config)
         assert agent is not None
         # No active workspace should exist
         assert orchestrator._active_workspace is None
 
-    def test_create_standalone_agent_uses_registry(self, orchestrator):
-        """Test that standalone agent uses the orchestrator's registry."""
-        config = AgentConfig(name="RegistryBot", description="A standalone agent", system_prompt="Be helpful.")
+    def test_create_unmanaged_agent_uses_registry(self, orchestrator):
+        """Test that unmanaged agent uses the orchestrator's registry."""
+        config = AgentConfig(name="RegistryBot", description="", system_prompt="Be helpful.")
         mock = make_mock_graph()
         with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
-            agent = orchestrator.create_standalone_agent(config)
+            agent = orchestrator.create_unmanaged_agent(config)
         # Agent should have access to the registry
         assert agent._registry is orchestrator.registry
