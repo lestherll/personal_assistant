@@ -70,51 +70,52 @@ class TestToolManagement:
 
 
 class TestRunAndHistory:
-    def test_run_returns_last_message_content(self, agent):
-        response = agent.run("Hello")
+    async def test_run_returns_last_message_content(self, agent):
+        response = await agent.run("Hello")
         assert response == "Test response"
 
-    def test_run_appends_to_history(self, agent):
-        agent.run("Hello")
+    async def test_run_appends_to_history(self, agent):
+        await agent.run("Hello")
         assert len(agent.history) > 0
 
-    def test_run_accumulates_history_across_turns(self, agent):
-        agent.run("First message")
+    async def test_run_accumulates_history_across_turns(self, agent):
+        await agent.run("First message")
         first_len = len(agent.history)
-        agent.run("Second message")
+        await agent.run("Second message")
         assert len(agent.history) > first_len
 
-    def test_run_passes_full_history_to_graph(self, agent):
-        agent.run("First message")
-        agent.run("Second message")
+    async def test_run_passes_full_history_to_graph(self, agent):
+        await agent.run("First message")
+        await agent.run("Second message")
         # Second invoke should receive more messages than the first
-        first_call_msgs = agent._graph.invoke.call_args_list[0][0][0]["messages"]
-        second_call_msgs = agent._graph.invoke.call_args_list[1][0][0]["messages"]
+        first_call_msgs = agent._graph.ainvoke.call_args_list[0][0][0]["messages"]
+        second_call_msgs = agent._graph.ainvoke.call_args_list[1][0][0]["messages"]
         assert len(second_call_msgs) > len(first_call_msgs)
 
 
 class TestReset:
-    def test_reset_clears_history(self, agent):
-        agent.run("Hello")
+    async def test_reset_clears_history(self, agent):
+        await agent.run("Hello")
         agent.reset()
         assert agent.history == []
 
-    def test_run_after_reset_starts_fresh(self, agent):
-        agent.run("Hello")
+    async def test_run_after_reset_starts_fresh(self, agent):
+        await agent.run("Hello")
         agent.reset()
-        agent.run("Hello again")
+        await agent.run("Hello again")
         # After reset, graph should receive only 1 message (not accumulated)
-        last_call_msgs = agent._graph.invoke.call_args_list[-1][0][0]["messages"]
+        last_call_msgs = agent._graph.ainvoke.call_args_list[-1][0][0]["messages"]
         assert len(last_call_msgs) == 1
 
 
 class TestStream:
-    def test_stream_yields_messages(self, agent):
-        messages = list(agent.stream("Hello"))
+    async def test_stream_yields_messages(self, agent):
+        messages = [msg async for msg in agent.stream("Hello")]
         assert len(messages) > 0
 
-    def test_stream_updates_history(self, agent):
-        list(agent.stream("Hello"))
+    async def test_stream_updates_history(self, agent):
+        async for _ in agent.stream("Hello"):
+            pass
         assert len(agent.history) > 0
 
 

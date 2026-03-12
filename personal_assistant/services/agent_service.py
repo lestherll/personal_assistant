@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 
 from personal_assistant.core.agent import Agent, AgentConfig
 from personal_assistant.core.orchestrator import Orchestrator
@@ -92,19 +92,19 @@ class AgentService:
     # Chat
     # ------------------------------------------------------------------
 
-    def run_agent(self, workspace_name: str, agent_name: str, message: str) -> str:
+    async def run_agent(self, workspace_name: str, agent_name: str, message: str) -> str:
         """Send a message to an agent and return its full text response."""
         ws = self._get_workspace_or_raise(workspace_name)
         agent = self._get_agent_or_raise(ws, agent_name)
-        return agent.run(message)
+        return await agent.run(message)
 
-    def stream_agent(
+    async def stream_agent(
         self, workspace_name: str, agent_name: str, message: str
-    ) -> Iterator[str]:
+    ) -> AsyncIterator[str]:
         """Stream an agent's response token by token as plain strings."""
         ws = self._get_workspace_or_raise(workspace_name)
         agent = self._get_agent_or_raise(ws, agent_name)
-        for msg in agent.stream(message):
+        async for msg in agent.stream(message):
             content = msg.content
             yield content if isinstance(content, str) else str(content)
 

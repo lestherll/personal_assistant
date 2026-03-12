@@ -136,41 +136,43 @@ class TestDeleteAgent:
 
 
 class TestRunAgent:
-    def test_returns_string_response(self, service, workspace):
+    async def test_returns_string_response(self, service, workspace):
         _create_agent(service)
-        response = service.run_agent("ws", "Bot", "Hello")
+        response = await service.run_agent("ws", "Bot", "Hello")
         assert isinstance(response, str)
         assert response == "Test response"
 
-    def test_unknown_workspace_raises(self, service):
+    async def test_unknown_workspace_raises(self, service):
         with pytest.raises(NotFoundError):
-            service.run_agent("ghost", "Bot", "Hello")
+            await service.run_agent("ghost", "Bot", "Hello")
 
-    def test_unknown_agent_raises(self, service, workspace):
+    async def test_unknown_agent_raises(self, service, workspace):
         with pytest.raises(NotFoundError):
-            service.run_agent("ws", "ghost", "Hello")
+            await service.run_agent("ws", "ghost", "Hello")
 
 
 class TestStreamAgent:
-    def test_yields_strings(self, service, workspace):
+    async def test_yields_strings(self, service, workspace):
         _create_agent(service)
-        chunks = list(service.stream_agent("ws", "Bot", "Hello"))
+        chunks = [c async for c in service.stream_agent("ws", "Bot", "Hello")]
         assert len(chunks) > 0
         assert all(isinstance(c, str) for c in chunks)
 
-    def test_unknown_workspace_raises(self, service):
+    async def test_unknown_workspace_raises(self, service):
         with pytest.raises(NotFoundError):
-            list(service.stream_agent("ghost", "Bot", "Hello"))
+            async for _ in service.stream_agent("ghost", "Bot", "Hello"):
+                pass
 
-    def test_unknown_agent_raises(self, service, workspace):
+    async def test_unknown_agent_raises(self, service, workspace):
         with pytest.raises(NotFoundError):
-            list(service.stream_agent("ws", "ghost", "Hello"))
+            async for _ in service.stream_agent("ws", "ghost", "Hello"):
+                pass
 
 
 class TestResetAgent:
-    def test_clears_history(self, service, workspace):
+    async def test_clears_history(self, service, workspace):
         _create_agent(service)
-        service.run_agent("ws", "Bot", "Hello")
+        await service.run_agent("ws", "Bot", "Hello")
         ws_obj = service._orchestrator.get_workspace("ws")
         assert ws_obj is not None
         agent = ws_obj.get_agent("Bot")
