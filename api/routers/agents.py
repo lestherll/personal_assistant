@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_agent_service, get_db_session
@@ -88,6 +90,25 @@ async def chat(
 ) -> ChatResponse:
     reply = await service.run_agent(workspace_name, agent_name, body.message)
     return ChatResponse(reply=reply)
+
+
+@router.post("/{agent_name}/chat/stream")
+async def chat_stream(
+    workspace_name: str,
+    agent_name: str,
+    body: ChatRequest,
+    service: AgentServiceDep,
+    _db: DbSessionDep,
+) -> StreamingResponse:
+    # Validate workspace + agent exist before streaming so errors map to HTTP codes.
+    service.get_agent(workspace_name, agent_name)
+
+    async def event_generator() -> AsyncIterator[str]:
+        async for token in service.stream_agent(workspace_name, agent_name, body.message):
+            yield f"data: {token}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
 
 
 @router.post("/{agent_name}/reset", status_code=status.HTTP_204_NO_CONTENT)

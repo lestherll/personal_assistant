@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -345,4 +346,90 @@ async def test_reset_agent_not_found_returns_404(
         transport=ASGITransport(app=router_app), base_url="http://test"
     ) as client:
         response = await client.post("/workspaces/ws1/agents/missing/reset")
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /workspaces/{workspace_name}/agents/{agent_name}/chat/stream
+# ---------------------------------------------------------------------------
+
+
+async def _collect_sse(response: httpx.Response) -> list[str]:
+    """Parse SSE response body into a list of data values."""
+    return [
+        line.removeprefix("data: ")
+        for line in response.text.splitlines()
+        if line.startswith("data: ")
+    ]
+
+
+async def test_chat_stream_returns_200(router_app: FastAPI, mock_service: MagicMock) -> None:
+    async def _tokens() -> AsyncIterator[str]:
+        yield "Hello"
+        yield " world"
+
+    mock_service.stream_agent.return_value = _tokens()
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=router_app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/workspaces/ws1/agents/Assistant/chat/stream", json={"message": "Hi"}
+        )
+    assert response.status_code == 200
+
+
+async def test_chat_stream_content_type(router_app: FastAPI, mock_service: MagicMock) -> None:
+    async def _tokens() -> AsyncIterator[str]:
+        yield "Hi"
+
+    mock_service.stream_agent.return_value = _tokens()
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=router_app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/workspaces/ws1/agents/Assistant/chat/stream", json={"message": "Hi"}
+        )
+    assert response.headers["content-type"].startswith("text/event-stream")
+
+
+async def test_chat_stream_yields_tokens(router_app: FastAPI, mock_service: MagicMock) -> None:
+    async def _tokens() -> AsyncIterator[str]:
+        yield "Hello"
+        yield " world"
+
+    mock_service.stream_agent.return_value = _tokens()
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=router_app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/workspaces/ws1/agents/Assistant/chat/stream", json={"message": "Hi"}
+        )
+    events = await _collect_sse(response)
+    assert events == ["Hello", " world", "[DONE]"]
+
+
+async def test_chat_stream_calls_service(router_app: FastAPI, mock_service: MagicMock) -> None:
+    async def _tokens() -> AsyncIterator[str]:
+        yield "ok"
+
+    mock_service.stream_agent.return_value = _tokens()
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=router_app), base_url="http://test"
+    ) as client:
+        await client.post(
+            "/workspaces/ws1/agents/Assistant/chat/stream", json={"message": "Hi"}
+        )
+    mock_service.stream_agent.assert_called_once_with("ws1", "Assistant", "Hi")
+
+
+async def test_chat_stream_agent_not_found_returns_404(
+    router_app: FastAPI, mock_service: MagicMock
+) -> None:
+    mock_service.get_agent.side_effect = NotFoundError("agent", "missing")
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=router_app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/workspaces/ws1/agents/missing/chat/stream", json={"message": "Hi"}
+        )
     assert response.status_code == 404
