@@ -3,11 +3,16 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_agent_service
-from api.schemas import AgentResponse
+from api.dependencies import get_agent_service, get_db_session
+from api.schemas import AgentResponse, ChatResponse
 from personal_assistant.services.agent_service import AgentService
-from personal_assistant.services.schemas import CreateAgentRequest, UpdateAgentRequest
+from personal_assistant.services.schemas import (
+    ChatRequest,
+    CreateAgentRequest,
+    UpdateAgentRequest,
+)
 
 router = APIRouter(
     prefix="/workspaces/{workspace_name}/agents",
@@ -41,9 +46,7 @@ def list_agents(workspace_name: str, service: AgentServiceDep) -> list[AgentResp
 
 
 @router.get("/{agent_name}", response_model=AgentResponse)
-def get_agent(
-    workspace_name: str, agent_name: str, service: AgentServiceDep
-) -> AgentResponse:
+def get_agent(workspace_name: str, agent_name: str, service: AgentServiceDep) -> AgentResponse:
     view = service.get_agent(workspace_name, agent_name)
     return AgentResponse.from_view(view)
 
@@ -68,7 +71,25 @@ def update_agent(
 
 
 @router.delete("/{agent_name}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_agent(
-    workspace_name: str, agent_name: str, service: AgentServiceDep
-) -> None:
+def delete_agent(workspace_name: str, agent_name: str, service: AgentServiceDep) -> None:
     service.delete_agent(workspace_name, agent_name)
+
+
+DbSessionDep = Annotated[AsyncSession | None, Depends(get_db_session)]
+
+
+@router.post("/{agent_name}/chat", response_model=ChatResponse)
+async def chat(
+    workspace_name: str,
+    agent_name: str,
+    body: ChatRequest,
+    service: AgentServiceDep,
+    _db: DbSessionDep,
+) -> ChatResponse:
+    reply = await service.run_agent(workspace_name, agent_name, body.message)
+    return ChatResponse(reply=reply)
+
+
+@router.post("/{agent_name}/reset", status_code=status.HTTP_204_NO_CONTENT)
+def reset_agent(workspace_name: str, agent_name: str, service: AgentServiceDep) -> None:
+    service.reset_agent(workspace_name, agent_name)

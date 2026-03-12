@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Annotated, cast
 
 from fastapi import Depends, Request
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.services.agent_service import AgentService
@@ -26,3 +28,13 @@ def get_agent_service(
 ) -> AgentService:
     """Return a request-scoped AgentService wrapping the orchestrator."""
     return AgentService(orchestrator)
+
+
+async def get_db_session(request: Request) -> AsyncIterator[AsyncSession | None]:
+    """Yield an AsyncSession if a session factory is configured, otherwise None."""
+    factory: async_sessionmaker[AsyncSession] | None = request.app.state.session_factory
+    if factory is None:
+        yield None
+        return
+    async with factory() as session:
+        yield session

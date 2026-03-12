@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport
 
-from api.dependencies import get_agent_service
+from api.dependencies import get_agent_service, get_db_session
 from api.exception_handlers import register_exception_handlers
 from api.routers import agents
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
@@ -43,7 +43,9 @@ def _agent_view(name: str = "Assistant") -> AgentView:
 
 @pytest.fixture
 def mock_service() -> MagicMock:
-    return MagicMock()
+    svc = MagicMock()
+    svc.run_agent = AsyncMock()
+    return svc
 
 
 @pytest.fixture
@@ -52,6 +54,7 @@ def router_app(mock_service: MagicMock) -> FastAPI:
     register_exception_handlers(app)
     app.include_router(agents.router)
     app.dependency_overrides[get_agent_service] = lambda: mock_service
+    app.dependency_overrides[get_db_session] = lambda: None
     return app
 
 
@@ -60,9 +63,7 @@ def router_app(mock_service: MagicMock) -> FastAPI:
 # ---------------------------------------------------------------------------
 
 
-async def test_create_agent_returns_201(
-    router_app: FastAPI, mock_service: MagicMock
-) -> None:
+async def test_create_agent_returns_201(router_app: FastAPI, mock_service: MagicMock) -> None:
     mock_service.create_agent.return_value = _agent_view()
     async with httpx.AsyncClient(
         transport=ASGITransport(app=router_app), base_url="http://test"
@@ -71,9 +72,7 @@ async def test_create_agent_returns_201(
     assert response.status_code == 201
 
 
-async def test_create_agent_returns_body(
-    router_app: FastAPI, mock_service: MagicMock
-) -> None:
+async def test_create_agent_returns_body(router_app: FastAPI, mock_service: MagicMock) -> None:
     mock_service.create_agent.return_value = _agent_view()
     async with httpx.AsyncClient(
         transport=ASGITransport(app=router_app), base_url="http://test"
@@ -83,9 +82,7 @@ async def test_create_agent_returns_body(
     assert data["config"]["name"] == "Assistant"
 
 
-async def test_create_agent_calls_service(
-    router_app: FastAPI, mock_service: MagicMock
-) -> None:
+async def test_create_agent_calls_service(router_app: FastAPI, mock_service: MagicMock) -> None:
     mock_service.create_agent.return_value = _agent_view()
     async with httpx.AsyncClient(
         transport=ASGITransport(app=router_app), base_url="http://test"
@@ -129,9 +126,7 @@ async def test_create_agent_already_exists_returns_409(
 # ---------------------------------------------------------------------------
 
 
-async def test_list_agents_returns_200(
-    router_app: FastAPI, mock_service: MagicMock
-) -> None:
+async def test_list_agents_returns_200(router_app: FastAPI, mock_service: MagicMock) -> None:
     mock_service.list_agents.return_value = [_agent_view("A"), _agent_view("B")]
     async with httpx.AsyncClient(
         transport=ASGITransport(app=router_app), base_url="http://test"
@@ -140,9 +135,7 @@ async def test_list_agents_returns_200(
     assert response.status_code == 200
 
 
-async def test_list_agents_returns_all(
-    router_app: FastAPI, mock_service: MagicMock
-) -> None:
+async def test_list_agents_returns_all(router_app: FastAPI, mock_service: MagicMock) -> None:
     mock_service.list_agents.return_value = [_agent_view("A"), _agent_view("B")]
     async with httpx.AsyncClient(
         transport=ASGITransport(app=router_app), base_url="http://test"
@@ -167,9 +160,7 @@ async def test_list_agents_workspace_not_found_returns_404(
 # ---------------------------------------------------------------------------
 
 
-async def test_get_agent_returns_200(
-    router_app: FastAPI, mock_service: MagicMock
-) -> None:
+async def test_get_agent_returns_200(router_app: FastAPI, mock_service: MagicMock) -> None:
     mock_service.get_agent.return_value = _agent_view()
     async with httpx.AsyncClient(
         transport=ASGITransport(app=router_app), base_url="http://test"
@@ -178,9 +169,7 @@ async def test_get_agent_returns_200(
     assert response.status_code == 200
 
 
-async def test_get_agent_returns_body(
-    router_app: FastAPI, mock_service: MagicMock
-) -> None:
+async def test_get_agent_returns_body(router_app: FastAPI, mock_service: MagicMock) -> None:
     mock_service.get_agent.return_value = _agent_view()
     async with httpx.AsyncClient(
         transport=ASGITransport(app=router_app), base_url="http://test"
@@ -205,9 +194,7 @@ async def test_get_agent_not_found_returns_404(
 # ---------------------------------------------------------------------------
 
 
-async def test_update_agent_returns_200(
-    router_app: FastAPI, mock_service: MagicMock
-) -> None:
+async def test_update_agent_returns_200(router_app: FastAPI, mock_service: MagicMock) -> None:
     mock_service.update_agent.return_value = _agent_view()
     async with httpx.AsyncClient(
         transport=ASGITransport(app=router_app), base_url="http://test"
@@ -218,16 +205,12 @@ async def test_update_agent_returns_200(
     assert response.status_code == 200
 
 
-async def test_update_agent_calls_service(
-    router_app: FastAPI, mock_service: MagicMock
-) -> None:
+async def test_update_agent_calls_service(router_app: FastAPI, mock_service: MagicMock) -> None:
     mock_service.update_agent.return_value = _agent_view()
     async with httpx.AsyncClient(
         transport=ASGITransport(app=router_app), base_url="http://test"
     ) as client:
-        await client.patch(
-            "/workspaces/ws1/agents/Assistant", json={"description": "Updated"}
-        )
+        await client.patch("/workspaces/ws1/agents/Assistant", json={"description": "Updated"})
     mock_service.update_agent.assert_called_once_with(
         "ws1",
         "Assistant",
@@ -246,9 +229,7 @@ async def test_update_agent_not_found_returns_404(
     async with httpx.AsyncClient(
         transport=ASGITransport(app=router_app), base_url="http://test"
     ) as client:
-        response = await client.patch(
-            "/workspaces/ws1/agents/missing", json={"description": "x"}
-        )
+        response = await client.patch("/workspaces/ws1/agents/missing", json={"description": "x"})
     assert response.status_code == 404
 
 
@@ -257,9 +238,7 @@ async def test_update_agent_not_found_returns_404(
 # ---------------------------------------------------------------------------
 
 
-async def test_delete_agent_returns_204(
-    router_app: FastAPI, mock_service: MagicMock
-) -> None:
+async def test_delete_agent_returns_204(router_app: FastAPI, mock_service: MagicMock) -> None:
     mock_service.delete_agent.return_value = None
     async with httpx.AsyncClient(
         transport=ASGITransport(app=router_app), base_url="http://test"
@@ -268,9 +247,7 @@ async def test_delete_agent_returns_204(
     assert response.status_code == 204
 
 
-async def test_delete_agent_calls_service(
-    router_app: FastAPI, mock_service: MagicMock
-) -> None:
+async def test_delete_agent_calls_service(router_app: FastAPI, mock_service: MagicMock) -> None:
     mock_service.delete_agent.return_value = None
     async with httpx.AsyncClient(
         transport=ASGITransport(app=router_app), base_url="http://test"
@@ -287,4 +264,85 @@ async def test_delete_agent_not_found_returns_404(
         transport=ASGITransport(app=router_app), base_url="http://test"
     ) as client:
         response = await client.delete("/workspaces/ws1/agents/missing")
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /workspaces/{workspace_name}/agents/{agent_name}/chat
+# ---------------------------------------------------------------------------
+
+
+async def test_chat_returns_200(router_app: FastAPI, mock_service: MagicMock) -> None:
+    mock_service.run_agent.return_value = "Hello!"
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=router_app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/workspaces/ws1/agents/Assistant/chat", json={"message": "Hi"}
+        )
+    assert response.status_code == 200
+
+
+async def test_chat_returns_reply(router_app: FastAPI, mock_service: MagicMock) -> None:
+    mock_service.run_agent.return_value = "Hello!"
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=router_app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/workspaces/ws1/agents/Assistant/chat", json={"message": "Hi"}
+        )
+    assert response.json() == {"reply": "Hello!"}
+
+
+async def test_chat_calls_service(router_app: FastAPI, mock_service: MagicMock) -> None:
+    mock_service.run_agent.return_value = "Hello!"
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=router_app), base_url="http://test"
+    ) as client:
+        await client.post("/workspaces/ws1/agents/Assistant/chat", json={"message": "Hi"})
+    mock_service.run_agent.assert_called_once_with("ws1", "Assistant", "Hi")
+
+
+async def test_chat_agent_not_found_returns_404(
+    router_app: FastAPI, mock_service: MagicMock
+) -> None:
+    mock_service.run_agent.side_effect = NotFoundError("agent", "missing")
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=router_app), base_url="http://test"
+    ) as client:
+        response = await client.post("/workspaces/ws1/agents/missing/chat", json={"message": "Hi"})
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /workspaces/{workspace_name}/agents/{agent_name}/reset
+# ---------------------------------------------------------------------------
+
+
+async def test_reset_returns_204(router_app: FastAPI, mock_service: MagicMock) -> None:
+    mock_service.reset_agent.return_value = None
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=router_app), base_url="http://test"
+    ) as client:
+        response = await client.post("/workspaces/ws1/agents/Assistant/reset")
+    assert response.status_code == 204
+
+
+async def test_reset_calls_service(router_app: FastAPI, mock_service: MagicMock) -> None:
+    mock_service.reset_agent.return_value = None
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=router_app), base_url="http://test"
+    ) as client:
+        await client.post("/workspaces/ws1/agents/Assistant/reset")
+    mock_service.reset_agent.assert_called_once_with("ws1", "Assistant")
+
+
+async def test_reset_agent_not_found_returns_404(
+    router_app: FastAPI, mock_service: MagicMock
+) -> None:
+    mock_service.reset_agent.side_effect = NotFoundError("agent", "missing")
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=router_app), base_url="http://test"
+    ) as client:
+        response = await client.post("/workspaces/ws1/agents/missing/reset")
     assert response.status_code == 404
