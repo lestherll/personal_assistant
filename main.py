@@ -16,7 +16,7 @@ def main() -> None:
     # --- Provider registry ---
     registry = ProviderRegistry()
     registry.register(AnthropicProvider())
-    registry.register(OllamaProvider(OllamaConfig(default_model="glm-5:cloud")), default=True)
+    registry.register(OllamaProvider(OllamaConfig(default_model="qwen3:8b")), default=True)
 
     # --- Orchestrator + default workspace ---
     orchestrator = Orchestrator(registry)
