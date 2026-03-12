@@ -1,6 +1,6 @@
 """Shared fixtures for unit tests."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage
@@ -50,16 +50,20 @@ def agent_config():
 
 
 def make_mock_graph(response: str = "Test response"):
+    messages = [HumanMessage(content="Hello"), AIMessage(content=response)]
     graph = MagicMock()
-    graph.invoke.return_value = {
-        "messages": [
-            HumanMessage(content="Hello"),
-            AIMessage(content=response),
-        ]
-    }
-    graph.stream.return_value = iter(
-        [{"messages": [HumanMessage(content="Hello"), AIMessage(content=response)]}]
-    )
+
+    # Sync (kept for tests that inspect call history directly)
+    graph.invoke.return_value = {"messages": messages}
+    graph.stream.return_value = iter([{"messages": messages}])
+
+    # Async — used by Agent.run() and Agent.stream()
+    graph.ainvoke = AsyncMock(return_value={"messages": messages})
+
+    async def _astream(*args, **kwargs):
+        yield {"messages": messages}
+
+    graph.astream = _astream
     return graph
 
 

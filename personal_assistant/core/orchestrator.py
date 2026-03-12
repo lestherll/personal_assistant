@@ -6,6 +6,8 @@ from personal_assistant.core.workspace import Workspace, WorkspaceConfig
 from personal_assistant.providers.registry import ProviderRegistry
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from personal_assistant.core.agent import Agent, AgentConfig
 
 
@@ -141,11 +143,12 @@ class Orchestrator:
     # Task delegation
     # ------------------------------------------------------------------
 
-    def delegate(
+    async def delegate(
         self,
         task: str,
         agent_name: str | None = None,
         workspace_name: str | None = None,
+        session: AsyncSession | None = None,
     ) -> str:
         """Delegate a task to an agent.
 
@@ -154,6 +157,7 @@ class Orchestrator:
             agent_name: Target a specific agent by name. Defaults to the first
                         available agent in the workspace.
             workspace_name: Target a specific workspace. Defaults to the active one.
+            session: Optional SQLAlchemy async session for persisting messages.
         """
         workspace = self.get_workspace(workspace_name) if workspace_name else self.active_workspace
         if workspace is None:
@@ -172,7 +176,7 @@ class Orchestrator:
             agent = workspace.get_agent(agents[0])
             assert agent is not None  # guaranteed: agents[0] was just retrieved from the same dict
 
-        return agent.run(task)
+        return await agent.run(task, session=session)
 
     # ------------------------------------------------------------------
     # Repr

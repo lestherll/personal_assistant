@@ -64,50 +64,56 @@ class TestWorkspaceManagement:
 
 
 class TestDelegation:
-    def test_delegate_routes_to_first_agent(self, orchestrator, workspace_config, mock_graph):
+    async def test_delegate_routes_to_first_agent(self, orchestrator, workspace_config, mock_graph):
+        from unittest.mock import AsyncMock
+
         ws = orchestrator.create_workspace(workspace_config)
         agent = make_mock_agent("Alpha")
-        agent.run.return_value = "response"
+        agent.run = AsyncMock(return_value="response")
         ws.add_agent(agent)
-        result = orchestrator.delegate("Do something")
-        agent.run.assert_called_once_with("Do something")
+        result = await orchestrator.delegate("Do something")
+        agent.run.assert_called_once_with("Do something", session=None)
         assert result == "response"
 
-    def test_delegate_to_named_agent(self, orchestrator, workspace_config):
+    async def test_delegate_to_named_agent(self, orchestrator, workspace_config):
+        from unittest.mock import AsyncMock
+
         ws = orchestrator.create_workspace(workspace_config)
         agent_a = make_mock_agent("Alpha")
         agent_b = make_mock_agent("Beta")
-        agent_a.run.return_value = "from alpha"
-        agent_b.run.return_value = "from beta"
+        agent_a.run = AsyncMock(return_value="from alpha")
+        agent_b.run = AsyncMock(return_value="from beta")
         ws.add_agent(agent_a)
         ws.add_agent(agent_b)
-        orchestrator.delegate("task", agent_name="Beta")
+        await orchestrator.delegate("task", agent_name="Beta")
         agent_b.run.assert_called_once()
         agent_a.run.assert_not_called()
 
-    def test_delegate_to_named_workspace(self, orchestrator):
+    async def test_delegate_to_named_workspace(self, orchestrator):
+        from unittest.mock import AsyncMock
+
         orchestrator.create_workspace(WorkspaceConfig(name="ws1", description=""))
         ws2 = orchestrator.create_workspace(WorkspaceConfig(name="ws2", description=""))
         agent = make_mock_agent("Bot")
-        agent.run.return_value = "from ws2"
+        agent.run = AsyncMock(return_value="from ws2")
         ws2.add_agent(agent)
-        orchestrator.delegate("task", workspace_name="ws2")
-        agent.run.assert_called_once_with("task")
+        await orchestrator.delegate("task", workspace_name="ws2")
+        agent.run.assert_called_once_with("task", session=None)
 
-    def test_delegate_no_active_workspace_raises(self, orchestrator):
+    async def test_delegate_no_active_workspace_raises(self, orchestrator):
         with pytest.raises(RuntimeError, match="No active workspace"):
-            orchestrator.delegate("task")
+            await orchestrator.delegate("task")
 
-    def test_delegate_no_agents_raises(self, orchestrator, workspace_config):
+    async def test_delegate_no_agents_raises(self, orchestrator, workspace_config):
         orchestrator.create_workspace(workspace_config)
         with pytest.raises(RuntimeError, match="No agents"):
-            orchestrator.delegate("task")
+            await orchestrator.delegate("task")
 
-    def test_delegate_nonexistent_agent_raises(self, orchestrator, workspace_config):
+    async def test_delegate_nonexistent_agent_raises(self, orchestrator, workspace_config):
         ws = orchestrator.create_workspace(workspace_config)
         ws.add_agent(make_mock_agent("Real"))
         with pytest.raises(ValueError, match="Ghost"):
-            orchestrator.delegate("task", agent_name="Ghost")
+            await orchestrator.delegate("task", agent_name="Ghost")
 
 
 class TestAgentHelpers:
