@@ -11,12 +11,14 @@ A modular AI personal assistant built on LangChain and LangGraph. The core conce
 - **langchain-anthropic** — Anthropic/Claude provider
 - **langchain-ollama** — Ollama local provider
 - **python-dotenv** — `.env` loading
-- **pydantic v2** — tool input schemas
+- **pydantic v2** — tool input schemas + request/response schemas
+- **SQLAlchemy 2 (async)** + **asyncpg** — optional PostgreSQL persistence
+- **alembic** — database migrations
 
 ### Dev tooling
 - **ruff** — linting + formatting (`uv run ruff check .` / `uv run ruff format .`)
 - **mypy** — static type checking in strict mode (`uv run mypy .`)
-- **pytest** + **pytest-mock** — unit tests (`uv run pytest`)
+- **pytest** + **pytest-mock** + **pytest-asyncio** — unit tests (`uv run pytest`)
 
 ## Project Structure
 
@@ -25,7 +27,7 @@ personal_assistant/
 ├── core/
 │   ├── agent.py          # Agent + AgentConfig — LangGraph ReAct agent with history
 │   ├── tool.py           # AssistantTool base class (extends LangChain BaseTool)
-│   ├── workspace.py      # Workspace — groups agents + tools, auto-registers tools
+│   ├── workspace.py      # Workspace + WorkspaceConfig — groups agents + tools
 │   └── orchestrator.py   # Orchestrator — manages registry, workspaces, task routing
 ├── providers/
 │   ├── base.py           # AIProvider + ProviderConfig abstract base
@@ -36,13 +38,24 @@ personal_assistant/
 │   └── assistant_agent.py  # AssistantAgent — general-purpose starter agent
 ├── tools/
 │   └── example_tool.py     # EchoTool — template for new tools
-└── workspaces/
-    └── default_workspace.py  # Factory: wires default agent + tools into a workspace
+├── workspaces/
+│   └── default_workspace.py  # Factory: wires default agent + tools into a workspace
+├── persistence/
+│   ├── database.py       # build_engine / build_session_factory (async SQLAlchemy)
+│   ├── models.py         # ORM models: Conversation, Message (PostgreSQL + JSONB)
+│   └── repository.py     # ConversationRepository — data-access layer
+└── services/
+    ├── agent_service.py      # AgentService — CRUD + run/stream/reset helpers
+    ├── workspace_service.py  # WorkspaceService — CRUD over orchestrator workspaces
+    ├── schemas.py            # Pydantic request models (Create/Update/Chat)
+    ├── views.py              # Dataclass response views (AgentView, WorkspaceView, …)
+    └── exceptions.py         # NotFoundError, AlreadyExistsError, ServiceValidationError
 tests/
 └── unit/
     ├── conftest.py           # Shared fixtures
     ├── core/                 # Tests for agent, workspace, orchestrator
-    └── providers/            # Tests for provider registry
+    ├── providers/            # Tests for provider registry
+    └── services/             # Tests for workspace_service, agent_service
 main.py                       # Entry point — bootstraps registry, orchestrator, REPL
 ```
 
@@ -58,13 +71,20 @@ Created from `AgentConfig` (name, description, system_prompt, provider, model, a
 Named containers for agents and tools. Tools added to a workspace are auto-registered with all compatible agents. Supports `add_agent`, `remove_agent`, `replace_agent`, `add_tool`, `remove_tool`.
 
 ### Orchestrator
-Owns the `ProviderRegistry` and all workspaces. Routes tasks via `delegate(task, agent_name, workspace_name)`. Helpers: `create_agent(config)`, `replace_agent(config)`.
+Owns the `ProviderRegistry` and all workspaces. Routes tasks via `delegate(task, agent_name, workspace_name, session=...)`. Helpers: `create_agent(config)`, `replace_agent(config)`, `create_workspace(config)`, `remove_workspace(name)`.
+
+### Services
+Thin business-logic layer sitting above the core. `WorkspaceService` and `AgentService` wrap the orchestrator with CRUD operations and raise typed exceptions (`NotFoundError`, `AlreadyExistsError`). Pydantic schemas in `schemas.py` describe request payloads; dataclass views in `views.py` describe responses.
+
+### Persistence (optional)
+Async SQLAlchemy + asyncpg backed by PostgreSQL. `Conversation` and `Message` ORM models live in `persistence/models.py`. `ConversationRepository` handles all DB access. Set `DATABASE_URL` to enable; omit it to run in-memory only. Use Alembic for migrations.
 
 ## Environment
 
 Copy `.env.example` to `.env` and set:
 ```
 ANTHROPIC_API_KEY=sk-ant-...
+DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/personal_assistant  # optional
 ```
 
 Ollama runs locally at `http://localhost:11434`. Pull models with `ollama pull <model>`.
@@ -83,8 +103,10 @@ uv run mypy .                # Type-check
 ## Conventions
 
 - New tools: subclass `AssistantTool` in `personal_assistant/tools/`, define `name`, `description`, `args_schema` (Pydantic model), and `_run()`.
-- New agents: subclass `Agent` or use `AgentConfig` directly with `orchestrator.create_agent()`.
+- New agents: subclass `Agent` or use `AgentConfig` directly with `orchestrator.create_agent()`. Use `AgentService` when calling from service/API layers.
 - New providers: subclass `AIProvider` in `personal_assistant/providers/`, implement `get_model()`, register in `main.py`.
-- New workspaces: add a factory function in `personal_assistant/workspaces/`.
+- New workspaces: add a factory function in `personal_assistant/workspaces/`. Use `WorkspaceService` when calling from service/API layers.
 - Do not hardcode API keys — always use `.env`.
-- Agent conversation history persists per agent instance. Call `agent.reset()` to clear.
+- Agent conversation history persists per agent instance. Call `agent.reset()` or `AgentService.reset_agent()` to clear.
+- `DATABASE_URL` is optional. When absent, the app runs fully in-memory with no persistence.
+- Service exceptions (`NotFoundError`, `AlreadyExistsError`) are in `services/exceptions.py` — catch these at API/CLI boundaries.
