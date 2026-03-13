@@ -11,6 +11,7 @@ import asyncio
 import socket
 from collections.abc import AsyncIterator
 
+import httpx
 import pytest
 import uvicorn
 
@@ -41,3 +42,10 @@ async def live_server_url() -> AsyncIterator[str]:
 
     server.should_exit = True
     await serve_task
+
+
+@pytest.fixture
+async def http_client(live_server_url: str) -> AsyncIterator[httpx.AsyncClient]:
+    """Pre-configured AsyncClient pointed at the live server."""
+    async with httpx.AsyncClient(base_url=live_server_url) as client:
+        yield client
