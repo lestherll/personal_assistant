@@ -192,9 +192,13 @@ class Workspace:
         """
         if not self._agents:
             raise RuntimeError(f"Workspace '{self.config.name}' has no agents to route to.")
+
         if self._supervisor is None:
             self._rebuild_supervisor()
-        assert self._supervisor is not None
+
+        if self._supervisor is None:
+            raise RuntimeError("Failed to initialize workspace supervisor.")
+
         return await self._supervisor.run(message, thread_id)
 
     # ------------------------------------------------------------------
