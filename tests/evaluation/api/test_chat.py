@@ -135,7 +135,6 @@ async def test_stream_answer_is_relevant(
     assert metric.measure(test_case) >= 0.5, f"Answer relevancy score: {metric.score}"
 
 
-
 @pytest.mark.evaluation
 async def test_career_agent_chat_correctness(
     http_client: httpx.AsyncClient,
@@ -155,9 +154,11 @@ async def test_career_agent_chat_correctness(
     metric = GEval(
         name="career_advice_correctness",
         criteria=(
-            "Is the career advice factually correct and based on sound principles of salary negotiation? "
-            "Good advice might include researching market rates, highlighting your accomplishments, "
-            "and being prepared to discuss your value to the company."
+            "Is the career advice factually correct and based on sound "
+            "principles of salary negotiation? "
+            "Good advice might include researching market rates, "
+            "highlighting your accomplishments,"
+            " and being prepared to discuss your value to the company."
         ),
         evaluation_params=[
             LLMTestCaseParams.INPUT,
@@ -220,7 +221,8 @@ async def test_python_coding_agent_chat_correctness(
         name="code_solution_correctness",
         criteria=(
             "Is the provided Python function correct and does it properly check for palindromes? "
-            "A correct solution should define a function that takes a string as input and returns True if it's a palindrome, False otherwise."
+            "A correct solution should define a function that takes a string as input and returns "
+            "True if it's a palindrome, False otherwise."
         ),
         evaluation_params=[
             LLMTestCaseParams.INPUT,

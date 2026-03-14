@@ -12,7 +12,7 @@ from personal_assistant.providers.base import AIProvider, ProviderConfig
 @dataclass
 class AnthropicConfig(ProviderConfig):
     name: str = "anthropic"
-    default_model: str = "claude-opus-4-6"
+    default_model: str = "claude-sonnet-4-6"
     api_key: str | None = None  # Falls back to ANTHROPIC_API_KEY env var
     temperature: float = 0
     max_tokens: int = 8096

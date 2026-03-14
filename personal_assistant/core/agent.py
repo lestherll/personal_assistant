@@ -6,10 +6,10 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from langchain.agents import create_agent
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.tools import BaseTool
-from langchain.agents import create_agent
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

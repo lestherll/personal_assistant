@@ -10,7 +10,7 @@ from personal_assistant.core.agent import Agent
 class WorkspaceConfig:
     name: str
     description: str
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=lambda: {})
 
 
 class Workspace:

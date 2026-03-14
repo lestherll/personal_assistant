@@ -25,15 +25,15 @@ class AgentView:
 class WorkspaceView:
     name: str
     description: str
-    metadata: dict[str, Any] = field(default_factory=dict)
-    agents: list[str] = field(default_factory=list)
-    tools: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=lambda: {})
+    agents: list[str] = field(default_factory=lambda: [])
+    tools: list[str] = field(default_factory=lambda: [])
 
 
 @dataclass
 class WorkspaceDetailView:
     name: str
     description: str
-    metadata: dict[str, Any] = field(default_factory=dict)
-    agents: list[AgentView] = field(default_factory=list)
-    tools: list[str] = field(default_factory=list)
+    metadata: dict[str, Any] = field(default_factory=lambda: {})
+    agents: list[AgentView] = field(default_factory=lambda: [])
+    tools: list[str] = field(default_factory=lambda: [])

@@ -12,8 +12,9 @@ def create_default_workspace(orchestrator: Orchestrator) -> Workspace:
     )
     workspace = orchestrator.create_workspace(config)
 
-    workspace.add_agents([agent_cls.create(orchestrator.registry)
-                          for agent_cls in DEFAULT_AGENTS.values()])
+    workspace.add_agents(
+        [agent_cls.create(orchestrator.registry) for agent_cls in DEFAULT_AGENTS.values()]
+    )
     workspace.add_tool(EchoTool())
     workspace.add_tool(AgentInformationTool())
 
