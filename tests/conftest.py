@@ -1,14 +1,16 @@
 """Shared fixtures for all tests (unit, functional, evaluation).
 
 Each test that needs a live server receives a ``live_server_url`` fixture
-which starts a real Uvicorn process bound to a random port, yields the base
-URL, then shuts it down cleanly.
+which starts a real Uvicorn server in a background thread, yields the base
+URL, then shuts it down cleanly.  Running the server in a separate thread
+means its event loop is always active and can accept requests regardless of
+which asyncio event loop the test is currently running.
 """
 
 from __future__ import annotations
 
-import asyncio
 import socket
+import threading
 from collections.abc import AsyncIterator
 
 import httpx
@@ -25,23 +27,35 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-@pytest.fixture
-async def live_server_url() -> AsyncIterator[str]:
-    """Start a real Uvicorn server and yield its base URL."""
+@pytest.fixture(scope="session")
+def live_server_url() -> str:
+    """Start a Uvicorn server in a background thread and return its base URL.
+
+    Session-scoped so the server is started once and shared across all tests.
+    Running in a thread (not a coroutine) means the server's event loop is
+    always active — tests that run their own event loops can still reach it.
+    """
     port = _free_port()
     config = uvicorn.Config(app, host="127.0.0.1", port=port, lifespan="on", log_level="warning")
     server = uvicorn.Server(config)
 
-    serve_task = asyncio.create_task(server.serve())
+    started = threading.Event()
+    original_startup = server.startup
 
-    # Wait until uvicorn signals it has finished startup.
-    while not server.started:
-        await asyncio.sleep(0.05)
+    async def _patched_startup(sockets: object = None) -> None:
+        await original_startup(sockets=sockets)
+        started.set()
+
+    server.startup = _patched_startup
+
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    started.wait(timeout=10)
 
     yield f"http://127.0.0.1:{port}"
 
     server.should_exit = True
-    await serve_task
+    thread.join(timeout=10)
 
 
 @pytest.fixture

@@ -8,7 +8,10 @@ from langchain_core.tools import BaseTool
 from personal_assistant.core.agent import Agent
 
 if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from personal_assistant.core.agent import AgentConfig
+    from personal_assistant.core.supervisor import WorkspaceSupervisor
     from personal_assistant.providers.registry import ProviderRegistry
 
 
@@ -31,6 +34,7 @@ class Workspace:
         self.config = config
         self._agents: dict[str, Agent] = {}
         self._tools: dict[str, BaseTool] = {}
+        self._supervisor: WorkspaceSupervisor | None = None
 
     # ------------------------------------------------------------------
     # Agent management
@@ -38,16 +42,24 @@ class Workspace:
 
     def add_agent(self, agent: Agent) -> None:
         """Add an agent and give it all tools currently in the workspace."""
+        self._register_agent(agent)
+        self._rebuild_supervisor()
+
+    def add_agents(self, agents: list[Agent]) -> None:
+        """Add multiple agents, rebuilding the supervisor only once at the end."""
+        for agent in agents:
+            self._register_agent(agent)
+        self._rebuild_supervisor()
+
+    def _register_agent(self, agent: Agent) -> None:
+        """Register an agent and propagate workspace tools without rebuilding the supervisor."""
         for tool in self._tools.values():
             agent.register_tool(tool)
         self._agents[agent.config.name] = agent
 
-    def add_agents(self, agents: list[Agent]) -> None:
-        for agent in agents:
-            self.add_agent(agent)
-
     def remove_agent(self, name: str) -> None:
         self._agents.pop(name, None)
+        self._rebuild_supervisor()
 
     def replace_agent(self, agent: Agent) -> None:
         """Swap out an existing agent (matched by name) with a new one.
@@ -134,6 +146,56 @@ class Workspace:
         if agent is None:
             raise KeyError(f"No agent named '{agent_name}' in workspace")
         agent.remove_tool(tool_name)
+
+    # ------------------------------------------------------------------
+    # Supervisor / workspace-level delegation
+    # ------------------------------------------------------------------
+
+    def _rebuild_supervisor(self) -> None:
+        """Rebuild (or clear) the WorkspaceSupervisor after agent changes."""
+        agents = list(self._agents.values())
+        if not agents:
+            self._supervisor = None
+            return
+
+        from personal_assistant.core.supervisor import WorkspaceSupervisor
+
+        llm = agents[0].llm
+        if self._supervisor is None:
+            self._supervisor = WorkspaceSupervisor(agents, llm)
+        else:
+            self._supervisor.rebuild(agents)
+
+    async def delegate(
+        self,
+        message: str,
+        thread_id: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> tuple[str, str, str]:
+        """Delegate a message to the workspace supervisor for automatic routing.
+
+        The supervisor uses an LLM to select the most suitable agent for each
+        turn.  Conversation history is maintained across turns via LangGraph's
+        checkpointer, keyed by ``thread_id``.
+
+        Args:
+            message: User message text.
+            thread_id: Conversation thread ID.  A new UUID is generated when
+                not provided.
+            session: Reserved for future DB-backed checkpointing (unused).
+
+        Returns:
+            Tuple of ``(response_text, thread_id, agent_used)``.
+
+        Raises:
+            RuntimeError: If the workspace has no agents.
+        """
+        if not self._agents:
+            raise RuntimeError(f"Workspace '{self.config.name}' has no agents to route to.")
+        if self._supervisor is None:
+            self._rebuild_supervisor()
+        assert self._supervisor is not None
+        return await self._supervisor.run(message, thread_id)
 
     # ------------------------------------------------------------------
     # Repr

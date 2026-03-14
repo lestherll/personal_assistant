@@ -193,9 +193,39 @@ class Orchestrator:
             if not agents:
                 raise RuntimeError(f"No agents in workspace '{workspace.config.name}'.")
             agent = workspace.get_agent(agents[0])
-            assert agent is not None  # guaranteed: agents[0] was just retrieved from the same dict
+
+            # assert agent is not None  # guaranteed: agents[0] came from the same dict
+
+        if agent is None:
+            raise RuntimeError("No agent found to delegate to.")
 
         return await agent.run(task, session=session)
+
+    async def delegate_to_workspace(
+        self,
+        task: str,
+        workspace_name: str | None = None,
+        thread_id: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> tuple[str, str, str]:
+        """Delegate a task to the workspace supervisor for automatic routing.
+
+        The supervisor selects the best agent per turn and maintains
+        conversation history across turns via LangGraph checkpointing.
+
+        Args:
+            task: User message.
+            workspace_name: Target workspace. Defaults to the active one.
+            thread_id: Conversation thread ID.  Generated if not provided.
+            session: Optional DB session (reserved for future persistence).
+
+        Returns:
+            Tuple of ``(response_text, thread_id, agent_used)``.
+        """
+        workspace = self.get_workspace(workspace_name) if workspace_name else self.active_workspace
+        if workspace is None:
+            raise RuntimeError("No active workspace. Create one first.")
+        return await workspace.delegate(task, thread_id=thread_id, session=session)
 
     # ------------------------------------------------------------------
     # Repr

@@ -79,6 +79,12 @@ class ChatResponse(BaseModel):
     conversation_id: uuid.UUID  # always returned
 
 
+class WorkspaceChatResponse(BaseModel):
+    response: str
+    thread_id: str
+    agent_used: str
+
+
 class ErrorResponse(BaseModel):
     error: str
     detail: str | None = None

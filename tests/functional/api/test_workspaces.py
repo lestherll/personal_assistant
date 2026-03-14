@@ -88,3 +88,46 @@ async def test_delete_workspace(http_client: httpx.AsyncClient) -> None:
     response = await http_client.delete("/workspaces/delete-ws")
 
     assert response.status_code == 204
+
+
+async def test_workspace_chat_returns_response_shape(http_client: httpx.AsyncClient) -> None:
+    response = await http_client.post(
+        "/workspaces/default/chat",
+        json={"message": "Say 'hello' and nothing else."},
+        timeout=120.0,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "response" in body
+    assert "thread_id" in body
+    assert "agent_used" in body
+    assert isinstance(body["response"], str)
+    assert len(body["response"]) > 0
+
+
+async def test_workspace_chat_preserves_thread_id(http_client: httpx.AsyncClient) -> None:
+    first = await http_client.post(
+        "/workspaces/default/chat",
+        json={"message": "My name is Alice."},
+        timeout=120.0,
+    )
+    assert first.status_code == 200
+    thread_id = first.json()["thread_id"]
+    assert thread_id
+
+    second = await http_client.post(
+        "/workspaces/default/chat",
+        json={"message": "What is my name?", "thread_id": thread_id},
+        timeout=120.0,
+    )
+    assert second.status_code == 200
+    assert second.json()["thread_id"] == thread_id
+
+
+async def test_workspace_chat_not_found(http_client: httpx.AsyncClient) -> None:
+    response = await http_client.post(
+        "/workspaces/nonexistent/chat",
+        json={"message": "Hello"},
+    )
+    assert response.status_code == 404

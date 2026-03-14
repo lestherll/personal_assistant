@@ -1,4 +1,4 @@
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from langchain_core.tools import BaseTool
@@ -15,6 +15,7 @@ def make_mock_agent(name: str = "TestAgent") -> Agent:
         system_prompt="You are a mock.",
     )
     agent.config.allowed_tools = []
+    agent.llm = MagicMock()
     return agent
 
 
@@ -169,3 +170,56 @@ class TestSelectiveToolAssignment:
 
         # Tool should NOT be in workspace tools
         assert "private_tool" not in workspace.list_tools()
+
+
+class TestWorkspaceDelegate:
+    @pytest.mark.asyncio
+    async def test_delegate_returns_response_and_thread_id(self, workspace):
+        agent = make_mock_agent("Alpha")
+        mock_supervisor = MagicMock()
+        mock_supervisor.run = AsyncMock(return_value=("hello", "tid-123", "Alpha"))
+
+        with patch(
+            "personal_assistant.core.supervisor.WorkspaceSupervisor",
+            return_value=mock_supervisor,
+        ):
+            workspace.add_agent(agent)
+        workspace._supervisor = mock_supervisor
+        response, tid, agent_used = await workspace.delegate("hi", thread_id="tid-123")
+
+        assert response == "hello"
+        assert tid == "tid-123"
+        assert agent_used == "Alpha"
+
+    @pytest.mark.asyncio
+    async def test_delegate_raises_with_no_agents(self, workspace):
+        with pytest.raises(RuntimeError, match="no agents"):
+            await workspace.delegate("hi")
+
+    @pytest.mark.asyncio
+    async def test_delegate_creates_supervisor_on_add_agent(self, workspace):
+        agent = make_mock_agent("Alpha")
+        mock_supervisor = MagicMock()
+        mock_supervisor.run = AsyncMock(return_value=("ok", "t1", "Alpha"))
+        mock_supervisor.rebuild = MagicMock()
+
+        with patch(
+            "personal_assistant.core.supervisor.WorkspaceSupervisor",
+            return_value=mock_supervisor,
+        ):
+            workspace.add_agent(agent)
+            assert workspace._supervisor is mock_supervisor
+
+    def test_remove_agent_clears_supervisor_when_empty(self, workspace):
+        agent = make_mock_agent("Alpha")
+        mock_supervisor = MagicMock()
+        mock_supervisor.rebuild = MagicMock()
+
+        with patch(
+            "personal_assistant.core.supervisor.WorkspaceSupervisor",
+            return_value=mock_supervisor,
+        ):
+            workspace.add_agent(agent)
+            workspace.remove_agent("Alpha")
+
+        assert workspace._supervisor is None

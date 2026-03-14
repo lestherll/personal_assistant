@@ -37,3 +37,10 @@ class WorkspaceDetailView:
     metadata: dict[str, Any] = field(default_factory=lambda: {})
     agents: list[AgentView] = field(default_factory=lambda: [])
     tools: list[str] = field(default_factory=lambda: [])
+
+
+@dataclass
+class WorkspaceChatView:
+    response: str
+    thread_id: str
+    agent_used: str

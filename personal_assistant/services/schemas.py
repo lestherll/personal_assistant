@@ -41,3 +41,8 @@ class ChatRequest(BaseModel):
 
 class ResetRequest(BaseModel):
     conversation_id: uuid.UUID | None = None  # UUID of the conversation to reset
+
+
+class WorkspaceChatRequest(BaseModel):
+    message: str = Field(examples=["Hello, how are you?"])
+    thread_id: str | None = None  # Omit to start a new conversation thread

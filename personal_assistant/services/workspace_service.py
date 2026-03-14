@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from personal_assistant.core.orchestrator import Orchestrator
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 from personal_assistant.core.workspace import Workspace, WorkspaceConfig
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
 from personal_assistant.services.views import (
     AgentConfigView,
     AgentView,
+    WorkspaceChatView,
     WorkspaceDetailView,
     WorkspaceView,
 )
@@ -61,6 +65,44 @@ class WorkspaceService:
     def delete_workspace(self, name: str) -> None:
         self._get_or_raise(name)
         self._orchestrator.remove_workspace(name)
+
+    # ------------------------------------------------------------------
+    # Chat (workspace-level routing)
+    # ------------------------------------------------------------------
+
+    async def chat(
+        self,
+        workspace_name: str,
+        message: str,
+        thread_id: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> WorkspaceChatView:
+        """Route a message through the workspace supervisor.
+
+        Args:
+            workspace_name: Target workspace.
+            message: User message.
+            thread_id: Conversation thread ID.  Generated if not provided.
+            session: Optional DB session for future persistence support.
+
+        Returns:
+            ``WorkspaceChatView`` with the response, thread_id, and agent used.
+
+        Raises:
+            NotFoundError: If the workspace does not exist.
+        """
+        self._get_or_raise(workspace_name)
+        response, returned_thread_id, agent_used = await self._orchestrator.delegate_to_workspace(
+            task=message,
+            workspace_name=workspace_name,
+            thread_id=thread_id,
+            session=session,
+        )
+        return WorkspaceChatView(
+            response=response,
+            thread_id=returned_thread_id,
+            agent_used=agent_used,
+        )
 
     # ------------------------------------------------------------------
     # Helpers
