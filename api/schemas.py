@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import uuid
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -75,6 +76,7 @@ class WorkspaceDetailResponse(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+    conversation_id: uuid.UUID  # always returned
 
 
 class ErrorResponse(BaseModel):

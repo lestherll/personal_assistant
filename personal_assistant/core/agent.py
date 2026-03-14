@@ -374,6 +374,10 @@ class Agent:
                 await repo.save_message(self._conversation_id, "ai", ai_content)
                 await repo.touch_conversation(self._conversation_id)
 
+    def clone(self) -> Agent:
+        """Return a fresh Agent with the same config, LLM, and tools but empty history."""
+        return Agent.from_llm(self.config, self._llm, tools=list(self._tools))
+
     def reset(self) -> None:
         """Clear in-memory conversation history.
 

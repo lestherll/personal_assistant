@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -35,3 +36,8 @@ class UpdateAgentRequest(BaseModel):
 
 class ChatRequest(BaseModel):
     message: str = Field(examples=["Hello, how are you?"])
+    conversation_id: uuid.UUID | None = None  # Omit to start a new conversation
+
+
+class ResetRequest(BaseModel):
+    conversation_id: uuid.UUID | None = None  # UUID of the conversation to reset

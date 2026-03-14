@@ -55,6 +55,22 @@ class ConversationRepository:
         )
         return list(result.scalars().all())
 
+    async def get_conversation_for_agent(
+        self,
+        conversation_id: uuid.UUID,
+        agent_name: str,
+        workspace_name: str,
+    ) -> Conversation | None:
+        """Return the conversation only if it belongs to the given agent and workspace."""
+        result = await self._session.execute(
+            select(Conversation).where(
+                Conversation.id == conversation_id,
+                Conversation.agent_name == agent_name,
+                Conversation.workspace_name == workspace_name,
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def save_message(
         self,
         conversation_id: uuid.UUID,

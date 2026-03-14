@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -16,6 +17,7 @@ from personal_assistant.providers import (
     OllamaProvider,
     ProviderRegistry,
 )
+from personal_assistant.services.conversation_pool import ConversationPool
 from personal_assistant.workspaces.default_workspace import create_default_workspace
 
 
@@ -31,6 +33,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     create_default_workspace(orchestrator)
     app.state.orchestrator = orchestrator
 
+    # --- Conversation pool ---
+    pool = ConversationPool(max_size=1000, ttl_seconds=7200.0)
+    app.state.conversation_pool = pool
+
+    async def _sweep() -> None:
+        while True:
+            await asyncio.sleep(900)  # 15 min
+            pool.evict_expired()
+
+    sweep_task = asyncio.create_task(_sweep())
+
     # --- Persistence (optional) ---
     engine = None
     database_url = os.getenv("DATABASE_URL")
@@ -41,6 +54,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.session_factory = None
 
     yield
+
+    sweep_task.cancel()
 
     if engine is not None:
         await engine.dispose()

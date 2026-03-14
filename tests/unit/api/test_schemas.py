@@ -148,9 +148,12 @@ def test_workspace_detail_response_from_view():
 
 
 def test_chat_response():
-    resp = ChatResponse(reply="Hello!")
+    import uuid
+
+    cid = uuid.uuid4()
+    resp = ChatResponse(reply="Hello!", conversation_id=cid)
     assert resp.reply == "Hello!"
-    assert resp.model_dump() == {"reply": "Hello!"}
+    assert resp.conversation_id == cid
 
 
 # ---------------------------------------------------------------------------

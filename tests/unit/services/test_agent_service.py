@@ -4,6 +4,8 @@ import pytest
 
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.services.agent_service import AgentService
+from personal_assistant.services.conversation_pool import ConversationPool
+from personal_assistant.services.conversation_service import ConversationService
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
 from personal_assistant.services.views import AgentView
 from tests.unit.conftest import make_mock_graph, make_mock_provider
@@ -20,7 +22,9 @@ def orchestrator():
 
 @pytest.fixture
 def service(orchestrator):
-    return AgentService(orchestrator)
+    pool = ConversationPool()
+    conv_service = ConversationService(orchestrator, pool)
+    return AgentService(orchestrator, conv_service)
 
 
 @pytest.fixture
@@ -31,6 +35,7 @@ def workspace(orchestrator):
 
 
 def _create_agent(service, workspace_name="ws", name="Bot", system_prompt="Be helpful."):
+    """Create an agent in the service. The patch must remain active for clone() calls."""
     mock = make_mock_graph()
     with patch("personal_assistant.core.agent.create_agent", return_value=mock):
         return service.create_agent(
@@ -39,6 +44,12 @@ def _create_agent(service, workspace_name="ws", name="Bot", system_prompt="Be he
             description="A test bot",
             system_prompt=system_prompt,
         )
+
+
+def _make_graph_patcher():
+    """Return a context manager that patches create_agent for the duration of a run."""
+    mock = make_mock_graph()
+    return patch("personal_assistant.core.agent.create_agent", return_value=mock), mock
 
 
 class TestCreateAgent:
@@ -136,50 +147,87 @@ class TestDeleteAgent:
 
 
 class TestRunAgent:
-    async def test_returns_string_response(self, service, workspace):
-        _create_agent(service)
-        response = await service.run_agent("ws", "Bot", "Hello")
-        assert isinstance(response, str)
-        assert response == "Test response"
+    async def test_returns_reply_and_conversation_id(self, service, workspace):
+        import uuid
+
+        patcher, _ = _make_graph_patcher()
+        with patcher:
+            _create_agent(service)
+            reply, conv_id = await service.run_agent(
+                "ws", "Bot", "Hello", conversation_id=None, session=None
+            )
+        assert isinstance(reply, str)
+        assert reply == "Test response"
+        assert isinstance(conv_id, uuid.UUID)
 
     async def test_unknown_workspace_raises(self, service):
         with pytest.raises(NotFoundError):
-            await service.run_agent("ghost", "Bot", "Hello")
+            await service.run_agent("ghost", "Bot", "Hello", conversation_id=None, session=None)
 
     async def test_unknown_agent_raises(self, service, workspace):
         with pytest.raises(NotFoundError):
-            await service.run_agent("ws", "ghost", "Hello")
+            await service.run_agent("ws", "ghost", "Hello", conversation_id=None, session=None)
+
+    async def test_template_history_stays_empty(self, service, workspace):
+        """Template agents must not accumulate history — clones do."""
+        patcher, _ = _make_graph_patcher()
+        with patcher:
+            _create_agent(service)
+            await service.run_agent("ws", "Bot", "Hello", conversation_id=None, session=None)
+        ws_obj = service._orchestrator.get_workspace("ws")
+        assert ws_obj is not None
+        template = ws_obj.get_agent("Bot")
+        assert template is not None
+        assert template.history == []
 
 
 class TestStreamAgent:
-    async def test_yields_strings(self, service, workspace):
-        _create_agent(service)
-        chunks = [c async for c in service.stream_agent("ws", "Bot", "Hello")]
+    async def test_returns_iterator_and_conversation_id(self, service, workspace):
+        import uuid
+
+        patcher, _ = _make_graph_patcher()
+        with patcher:
+            _create_agent(service)
+            tokens, conv_id = await service.stream_agent(
+                "ws", "Bot", "Hello", conversation_id=None, session=None
+            )
+            assert isinstance(conv_id, uuid.UUID)
+            chunks = [c async for c in tokens]
         assert len(chunks) > 0
         assert all(isinstance(c, str) for c in chunks)
 
     async def test_unknown_workspace_raises(self, service):
         with pytest.raises(NotFoundError):
-            async for _ in service.stream_agent("ghost", "Bot", "Hello"):
-                pass
+            await service.stream_agent("ghost", "Bot", "Hello", conversation_id=None, session=None)
 
     async def test_unknown_agent_raises(self, service, workspace):
         with pytest.raises(NotFoundError):
-            async for _ in service.stream_agent("ws", "ghost", "Hello"):
-                pass
+            await service.stream_agent("ws", "ghost", "Hello", conversation_id=None, session=None)
 
 
 class TestResetAgent:
-    async def test_clears_history(self, service, workspace):
+    def test_resets_template_when_no_conversation_id(self, service, workspace):
         _create_agent(service)
-        await service.run_agent("ws", "Bot", "Hello")
+        # Should complete without error; template history is already empty
+        service.reset_agent("ws", "Bot")
         ws_obj = service._orchestrator.get_workspace("ws")
         assert ws_obj is not None
-        agent = ws_obj.get_agent("Bot")
-        assert agent is not None
-        assert len(agent.history) > 0
-        service.reset_agent("ws", "Bot")
-        assert agent.history == []
+        assert ws_obj.get_agent("Bot") is not None
+
+    async def test_evicts_clone_when_conversation_id_given(self, service, workspace):
+        patcher, _ = _make_graph_patcher()
+        with patcher:
+            _create_agent(service)
+            _, conv_id = await service.run_agent(
+                "ws", "Bot", "Hello", conversation_id=None, session=None
+            )
+        # Clone should be in pool
+        pool = service._conversation_service._pool
+        assert pool.get("ws", "Bot", conv_id) is not None
+
+        service.reset_agent("ws", "Bot", conversation_id=conv_id)
+        # Clone should be evicted
+        assert pool.get("ws", "Bot", conv_id) is None
 
     def test_unknown_workspace_raises(self, service):
         with pytest.raises(NotFoundError):

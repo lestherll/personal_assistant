@@ -79,6 +79,7 @@ def mock_workspace_service() -> MagicMock:
 def mock_agent_service() -> MagicMock:
     svc = MagicMock()
     svc.run_agent = AsyncMock()
+    svc.stream_agent = AsyncMock()
     return svc
 
 

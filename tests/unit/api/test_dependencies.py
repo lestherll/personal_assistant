@@ -8,16 +8,25 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from api.dependencies import get_agent_service, get_orchestrator, get_workspace_service
+from api.dependencies import (
+    get_agent_service,
+    get_conversation_pool,
+    get_conversation_service,
+    get_orchestrator,
+    get_workspace_service,
+)
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.services.agent_service import AgentService
+from personal_assistant.services.conversation_pool import ConversationPool
+from personal_assistant.services.conversation_service import ConversationService
 from personal_assistant.services.workspace_service import WorkspaceService
 
 
-def _make_request(orchestrator: Orchestrator) -> MagicMock:
-    """Return a minimal mock Request with app.state.orchestrator set."""
+def _make_request(orchestrator: Orchestrator, pool: ConversationPool | None = None) -> MagicMock:
+    """Return a minimal mock Request with required app.state attributes set."""
     request = MagicMock()
     request.app.state.orchestrator = orchestrator
+    request.app.state.conversation_pool = pool or ConversationPool()
     return request
 
 
@@ -45,6 +54,21 @@ def test_get_orchestrator_identity_is_preserved(mock_registry):
 
 
 # ---------------------------------------------------------------------------
+# get_conversation_pool
+# ---------------------------------------------------------------------------
+
+
+def test_get_conversation_pool_returns_pool_from_app_state(mock_registry):
+    orchestrator = Orchestrator(mock_registry)
+    pool = ConversationPool(max_size=50)
+    request = _make_request(orchestrator, pool)
+
+    result = get_conversation_pool(request)
+
+    assert result is pool
+
+
+# ---------------------------------------------------------------------------
 # get_workspace_service
 # ---------------------------------------------------------------------------
 
@@ -66,21 +90,48 @@ def test_get_workspace_service_wraps_given_orchestrator(mock_registry):
 
 
 # ---------------------------------------------------------------------------
+# get_conversation_service
+# ---------------------------------------------------------------------------
+
+
+def test_get_conversation_service_returns_conversation_service(mock_registry):
+    orchestrator = Orchestrator(mock_registry)
+    pool = ConversationPool()
+
+    service = get_conversation_service(orchestrator, pool)
+
+    assert isinstance(service, ConversationService)
+
+
+def test_get_conversation_service_uses_given_pool(mock_registry):
+    orchestrator = Orchestrator(mock_registry)
+    pool = ConversationPool()
+
+    service = get_conversation_service(orchestrator, pool)
+
+    assert service._pool is pool
+
+
+# ---------------------------------------------------------------------------
 # get_agent_service
 # ---------------------------------------------------------------------------
 
 
 def test_get_agent_service_returns_agent_service(mock_registry):
     orchestrator = Orchestrator(mock_registry)
+    pool = ConversationPool()
+    conv_service = ConversationService(orchestrator, pool)
 
-    service = get_agent_service(orchestrator)
+    service = get_agent_service(orchestrator, conv_service)
 
     assert isinstance(service, AgentService)
 
 
 def test_get_agent_service_wraps_given_orchestrator(mock_registry):
     orchestrator = Orchestrator(mock_registry)
+    pool = ConversationPool()
+    conv_service = ConversationService(orchestrator, pool)
 
-    service = get_agent_service(orchestrator)
+    service = get_agent_service(orchestrator, conv_service)
 
     assert service._orchestrator is orchestrator

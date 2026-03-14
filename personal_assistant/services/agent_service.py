@@ -1,17 +1,26 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 from personal_assistant.core.agent import Agent, AgentConfig
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.core.workspace import Workspace
+from personal_assistant.services.conversation_service import ConversationService
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
 from personal_assistant.services.views import AgentConfigView, AgentView
 
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
+
 
 class AgentService:
-    def __init__(self, orchestrator: Orchestrator) -> None:
+    def __init__(
+        self, orchestrator: Orchestrator, conversation_service: ConversationService
+    ) -> None:
         self._orchestrator = orchestrator
+        self._conversation_service = conversation_service
 
     # ------------------------------------------------------------------
     # CRUD
@@ -92,27 +101,67 @@ class AgentService:
     # Chat
     # ------------------------------------------------------------------
 
-    async def run_agent(self, workspace_name: str, agent_name: str, message: str) -> str:
-        """Send a message to an agent and return its full text response."""
-        ws = self._get_workspace_or_raise(workspace_name)
-        agent = self._get_agent_or_raise(ws, agent_name)
-        return await agent.run(message)
+    async def run_agent(
+        self,
+        workspace_name: str,
+        agent_name: str,
+        message: str,
+        *,
+        conversation_id: uuid.UUID | None,
+        session: AsyncSession | None,
+    ) -> tuple[str, uuid.UUID]:
+        """Send a message to an agent and return (reply, conversation_id)."""
+        clone, conv_id = await self._conversation_service.get_or_create_clone(
+            workspace_name, agent_name, conversation_id, session
+        )
+        reply = await clone.run(message, session=session)
+        return reply, conv_id
 
     async def stream_agent(
-        self, workspace_name: str, agent_name: str, message: str
-    ) -> AsyncIterator[str]:
-        """Stream an agent's response token by token as plain strings."""
-        ws = self._get_workspace_or_raise(workspace_name)
-        agent = self._get_agent_or_raise(ws, agent_name)
-        async for msg in agent.stream(message):
-            content = msg.content
-            yield content if isinstance(content, str) else str(content)
+        self,
+        workspace_name: str,
+        agent_name: str,
+        message: str,
+        *,
+        conversation_id: uuid.UUID | None,
+        session: AsyncSession | None,
+    ) -> tuple[AsyncIterator[str], uuid.UUID]:
+        """Resolve the conversation then return (token_iterator, conversation_id).
 
-    def reset_agent(self, workspace_name: str, agent_name: str) -> None:
-        """Clear an agent's conversation history."""
-        ws = self._get_workspace_or_raise(workspace_name)
-        agent = self._get_agent_or_raise(ws, agent_name)
-        agent.reset()
+        The conversation_id is resolved before any tokens are yielded so callers
+        can surface errors as proper HTTP responses rather than SSE events.
+        """
+        clone, conv_id = await self._conversation_service.get_or_create_clone(
+            workspace_name, agent_name, conversation_id, session
+        )
+
+        async def _generate() -> AsyncIterator[str]:
+            async for msg in clone.stream(message, session=session):
+                content = msg.content
+                yield content if isinstance(content, str) else str(content)
+
+        return _generate(), conv_id
+
+    def reset_agent(
+        self,
+        workspace_name: str,
+        agent_name: str,
+        *,
+        conversation_id: uuid.UUID | None = None,
+    ) -> None:
+        """Clear conversation history.
+
+        If conversation_id is given, evicts the clone from the pool (DB rows kept).
+        If conversation_id is None, resets the template agent (REPL backward-compat).
+        """
+        if conversation_id is not None:
+            self._conversation_service.reset_conversation(
+                workspace_name, agent_name, conversation_id
+            )
+        else:
+            ws = self._get_workspace_or_raise(workspace_name)
+            agent = self._get_agent_or_raise(ws, agent_name)
+            agent.reset()
 
     # ------------------------------------------------------------------
     # Helpers

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Body, Depends, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,6 +14,7 @@ from personal_assistant.services.agent_service import AgentService
 from personal_assistant.services.schemas import (
     ChatRequest,
     CreateAgentRequest,
+    ResetRequest,
     UpdateAgentRequest,
 )
 
@@ -91,10 +92,16 @@ async def chat(
     agent_name: AgentName,
     body: ChatRequest,
     service: AgentServiceDep,
-    _db: DbSessionDep,
+    db: DbSessionDep,
 ) -> ChatResponse:
-    reply = await service.run_agent(workspace_name, agent_name, body.message)
-    return ChatResponse(reply=reply)
+    reply, conv_id = await service.run_agent(
+        workspace_name,
+        agent_name,
+        body.message,
+        conversation_id=body.conversation_id,
+        session=db,
+    )
+    return ChatResponse(reply=reply, conversation_id=conv_id)
 
 
 @router.post("/{agent_name}/chat/stream")
@@ -103,21 +110,35 @@ async def chat_stream(
     agent_name: AgentName,
     body: ChatRequest,
     service: AgentServiceDep,
-    _db: DbSessionDep,
+    db: DbSessionDep,
 ) -> StreamingResponse:
-    # Validate workspace + agent exist before streaming so errors map to HTTP codes.
-    service.get_agent(workspace_name, agent_name)
+    # Resolve conversation_id before streaming so errors become proper HTTP responses.
+    tokens, conv_id = await service.stream_agent(
+        workspace_name,
+        agent_name,
+        body.message,
+        conversation_id=body.conversation_id,
+        session=db,
+    )
 
     async def event_generator() -> AsyncIterator[str]:
-        async for token in service.stream_agent(workspace_name, agent_name, body.message):
+        async for token in tokens:
             yield f"data: {token}\n\n"
         yield "data: [DONE]\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"X-Conversation-Id": str(conv_id)},
+    )
 
 
 @router.post("/{agent_name}/reset", status_code=status.HTTP_204_NO_CONTENT)
 def reset_agent(
-    workspace_name: WorkspaceName, agent_name: AgentName, service: AgentServiceDep
+    workspace_name: WorkspaceName,
+    agent_name: AgentName,
+    service: AgentServiceDep,
+    body: ResetRequest | None = Body(default=None),
 ) -> None:
-    service.reset_agent(workspace_name, agent_name)
+    conv_id = body.conversation_id if body is not None else None
+    service.reset_agent(workspace_name, agent_name, conversation_id=conv_id)

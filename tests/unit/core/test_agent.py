@@ -328,3 +328,51 @@ class TestBatchTools:
 
         assert any(t.name == "single_tool" for t in agent._tools)
         assert agent._dirty is False
+
+
+class TestClone:
+    """Tests for Agent.clone()."""
+
+    def test_clone_returns_new_instance(self, agent) -> None:
+        clone = agent.clone()
+        assert clone is not agent
+
+    def test_clone_has_same_config(self, agent) -> None:
+        clone = agent.clone()
+        assert clone.config is agent.config
+
+    def test_clone_has_same_llm(self, agent) -> None:
+        clone = agent.clone()
+        assert clone._llm is agent._llm
+
+    def test_clone_has_same_tools(self, agent, mock_graph) -> None:
+        tool = make_tool("weather")
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
+            agent.register_tool(tool)
+            clone = agent.clone()
+        assert clone.tools == agent.tools
+
+    def test_clone_has_empty_history(self, agent) -> None:
+        """Clone starts with empty history regardless of template state."""
+        from unittest.mock import MagicMock as MM
+
+        agent._history.append(MM())
+        clone = agent.clone()
+        assert clone.history == []
+
+    def test_clone_has_no_conversation_id(self, agent) -> None:
+        from unittest.mock import MagicMock as MM
+
+        agent._conversation_id = MM()
+        clone = agent.clone()
+        assert clone.conversation_id is None
+
+    async def test_clone_history_is_independent(self, agent) -> None:
+        clone = agent.clone()
+        await agent.run("Hello")
+        assert clone.history == []
+
+    def test_clone_of_clone_is_independent(self, agent) -> None:
+        clone1 = agent.clone()
+        clone2 = agent.clone()
+        assert clone1 is not clone2

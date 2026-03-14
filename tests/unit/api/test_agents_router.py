@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 
@@ -15,6 +16,8 @@ _CREATE_BODY = {
     "description": "General agent",
     "system_prompt": "You are helpful.",
 }
+
+_FIXED_UUID = uuid.uuid4()
 
 
 # ---------------------------------------------------------------------------
@@ -210,35 +213,52 @@ async def test_delete_agent_not_found_returns_404(
 async def test_chat_returns_200(
     api_client: httpx.AsyncClient, mock_agent_service: MagicMock
 ) -> None:
-    mock_agent_service.run_agent.return_value = "Hello!"
+    mock_agent_service.run_agent = AsyncMock(return_value=("Hello!", _FIXED_UUID))
     response = await api_client.post(
         "/workspaces/ws1/agents/Assistant/chat", json={"message": "Hi"}
     )
     assert response.status_code == 200
 
 
-async def test_chat_returns_reply(
+async def test_chat_returns_reply_and_conversation_id(
     api_client: httpx.AsyncClient, mock_agent_service: MagicMock
 ) -> None:
-    mock_agent_service.run_agent.return_value = "Hello!"
+    mock_agent_service.run_agent = AsyncMock(return_value=("Hello!", _FIXED_UUID))
     response = await api_client.post(
         "/workspaces/ws1/agents/Assistant/chat", json={"message": "Hi"}
     )
-    assert response.json() == {"reply": "Hello!"}
+    body = response.json()
+    assert body["reply"] == "Hello!"
+    assert body["conversation_id"] == str(_FIXED_UUID)
 
 
 async def test_chat_calls_service(
     api_client: httpx.AsyncClient, mock_agent_service: MagicMock
 ) -> None:
-    mock_agent_service.run_agent.return_value = "Hello!"
+    mock_agent_service.run_agent = AsyncMock(return_value=("Hello!", _FIXED_UUID))
     await api_client.post("/workspaces/ws1/agents/Assistant/chat", json={"message": "Hi"})
-    mock_agent_service.run_agent.assert_called_once_with("ws1", "Assistant", "Hi")
+    mock_agent_service.run_agent.assert_called_once_with(
+        "ws1", "Assistant", "Hi", conversation_id=None, session=None
+    )
+
+
+async def test_chat_with_conversation_id_passes_it_to_service(
+    api_client: httpx.AsyncClient, mock_agent_service: MagicMock
+) -> None:
+    mock_agent_service.run_agent = AsyncMock(return_value=("Hello!", _FIXED_UUID))
+    await api_client.post(
+        "/workspaces/ws1/agents/Assistant/chat",
+        json={"message": "Hi", "conversation_id": str(_FIXED_UUID)},
+    )
+    mock_agent_service.run_agent.assert_called_once_with(
+        "ws1", "Assistant", "Hi", conversation_id=_FIXED_UUID, session=None
+    )
 
 
 async def test_chat_agent_not_found_returns_404(
     api_client: httpx.AsyncClient, mock_agent_service: MagicMock
 ) -> None:
-    mock_agent_service.run_agent.side_effect = NotFoundError("agent", "missing")
+    mock_agent_service.run_agent = AsyncMock(side_effect=NotFoundError("agent", "missing"))
     response = await api_client.post("/workspaces/ws1/agents/missing/chat", json={"message": "Hi"})
     assert response.status_code == 404
 
@@ -256,12 +276,25 @@ async def test_reset_returns_204(
     assert response.status_code == 204
 
 
-async def test_reset_calls_service(
+async def test_reset_calls_service_without_conversation_id(
     api_client: httpx.AsyncClient, mock_agent_service: MagicMock
 ) -> None:
     mock_agent_service.reset_agent.return_value = None
     await api_client.post("/workspaces/ws1/agents/Assistant/reset")
-    mock_agent_service.reset_agent.assert_called_once_with("ws1", "Assistant")
+    mock_agent_service.reset_agent.assert_called_once_with("ws1", "Assistant", conversation_id=None)
+
+
+async def test_reset_calls_service_with_conversation_id(
+    api_client: httpx.AsyncClient, mock_agent_service: MagicMock
+) -> None:
+    mock_agent_service.reset_agent.return_value = None
+    await api_client.post(
+        "/workspaces/ws1/agents/Assistant/reset",
+        json={"conversation_id": str(_FIXED_UUID)},
+    )
+    mock_agent_service.reset_agent.assert_called_once_with(
+        "ws1", "Assistant", conversation_id=_FIXED_UUID
+    )
 
 
 async def test_reset_agent_not_found_returns_404(
@@ -292,7 +325,7 @@ async def test_chat_stream_returns_200(
         yield "Hello"
         yield " world"
 
-    mock_agent_service.stream_agent.return_value = _tokens()
+    mock_agent_service.stream_agent = AsyncMock(return_value=(_tokens(), _FIXED_UUID))
     response = await api_client.post(
         "/workspaces/ws1/agents/Assistant/chat/stream", json={"message": "Hi"}
     )
@@ -305,7 +338,7 @@ async def test_chat_stream_content_type(
     async def _tokens() -> AsyncIterator[str]:
         yield "Hi"
 
-    mock_agent_service.stream_agent.return_value = _tokens()
+    mock_agent_service.stream_agent = AsyncMock(return_value=(_tokens(), _FIXED_UUID))
     response = await api_client.post(
         "/workspaces/ws1/agents/Assistant/chat/stream", json={"message": "Hi"}
     )
@@ -319,11 +352,24 @@ async def test_chat_stream_yields_tokens(
         yield "Hello"
         yield " world"
 
-    mock_agent_service.stream_agent.return_value = _tokens()
+    mock_agent_service.stream_agent = AsyncMock(return_value=(_tokens(), _FIXED_UUID))
     response = await api_client.post(
         "/workspaces/ws1/agents/Assistant/chat/stream", json={"message": "Hi"}
     )
     assert _collect_sse(response) == ["Hello", " world", "[DONE]"]
+
+
+async def test_chat_stream_returns_conversation_id_header(
+    api_client: httpx.AsyncClient, mock_agent_service: MagicMock
+) -> None:
+    async def _tokens() -> AsyncIterator[str]:
+        yield "ok"
+
+    mock_agent_service.stream_agent = AsyncMock(return_value=(_tokens(), _FIXED_UUID))
+    response = await api_client.post(
+        "/workspaces/ws1/agents/Assistant/chat/stream", json={"message": "Hi"}
+    )
+    assert response.headers["x-conversation-id"] == str(_FIXED_UUID)
 
 
 async def test_chat_stream_calls_service(
@@ -332,15 +378,17 @@ async def test_chat_stream_calls_service(
     async def _tokens() -> AsyncIterator[str]:
         yield "ok"
 
-    mock_agent_service.stream_agent.return_value = _tokens()
+    mock_agent_service.stream_agent = AsyncMock(return_value=(_tokens(), _FIXED_UUID))
     await api_client.post("/workspaces/ws1/agents/Assistant/chat/stream", json={"message": "Hi"})
-    mock_agent_service.stream_agent.assert_called_once_with("ws1", "Assistant", "Hi")
+    mock_agent_service.stream_agent.assert_called_once_with(
+        "ws1", "Assistant", "Hi", conversation_id=None, session=None
+    )
 
 
 async def test_chat_stream_agent_not_found_returns_404(
     api_client: httpx.AsyncClient, mock_agent_service: MagicMock
 ) -> None:
-    mock_agent_service.get_agent.side_effect = NotFoundError("agent", "missing")
+    mock_agent_service.stream_agent = AsyncMock(side_effect=NotFoundError("agent", "missing"))
     response = await api_client.post(
         "/workspaces/ws1/agents/missing/chat/stream", json={"message": "Hi"}
     )
