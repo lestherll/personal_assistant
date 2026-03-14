@@ -122,6 +122,25 @@ class Orchestrator:
         workspace.replace_agent(agent)
         return agent
 
+    def get_or_create_agent(
+        self,
+        config: AgentConfig,
+        workspace_name: str | None = None,
+    ) -> Agent:
+        """Return the existing agent with ``config.name``, or create and add it.
+
+        Args:
+            config: Config for the agent to look up or create.
+            workspace_name: Target workspace. Defaults to the active one.
+
+        Returns:
+            The existing or newly created Agent.
+        """
+        workspace = self.get_workspace(workspace_name) if workspace_name else self.active_workspace
+        if workspace is None:
+            raise RuntimeError("No active workspace. Create one first.")
+        return workspace.get_or_create_agent(config, self.registry)
+
     def create_unmanaged_agent(self, config: AgentConfig) -> Agent:
         """Create an agent without adding it to any workspace.
 

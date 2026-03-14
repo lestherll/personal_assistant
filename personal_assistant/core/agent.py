@@ -56,6 +56,7 @@ class Agent:
         registry: ProviderRegistry | None = None,
         *,
         llm: BaseChatModel | None = None,
+        tools: list[BaseTool] | None = None,
     ) -> None:
         """Initialize an Agent.
 
@@ -63,6 +64,7 @@ class Agent:
             config: Agent configuration.
             registry: Provider registry for resolving LLM. Required if llm is not provided.
             llm: Pre-resolved LLM instance. If provided, registry is ignored.
+            tools: Tools to register immediately at construction time.
 
         Raises:
             ValueError: If neither registry nor llm is provided.
@@ -85,6 +87,9 @@ class Agent:
             assert registry is not None  # guaranteed by the check above
             self._llm = registry.get(config.provider).get_model(config.model)
 
+        for tool in tools or []:
+            self.register_tool(tool)
+
         self._graph: Any = self._build_graph()
 
     # ------------------------------------------------------------------
@@ -92,7 +97,12 @@ class Agent:
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_config(cls, config: AgentConfig, registry: ProviderRegistry) -> Agent:
+    def from_config(
+        cls,
+        config: AgentConfig,
+        registry: ProviderRegistry,
+        tools: list[BaseTool] | None = None,
+    ) -> Agent:
         """Create an Agent from config using a ProviderRegistry.
 
         This is the standard pattern for creating agents within the orchestrator.
@@ -100,14 +110,20 @@ class Agent:
         Args:
             config: Agent configuration.
             registry: Provider registry for resolving LLM.
+            tools: Tools to register at construction time.
 
         Returns:
             A new Agent instance.
         """
-        return cls(config, registry=registry)
+        return cls(config, registry=registry, tools=tools)
 
     @classmethod
-    def from_llm(cls, config: AgentConfig, llm: BaseChatModel) -> Agent:
+    def from_llm(
+        cls,
+        config: AgentConfig,
+        llm: BaseChatModel,
+        tools: list[BaseTool] | None = None,
+    ) -> Agent:
         """Create a standalone Agent with a pre-resolved LLM.
 
         This pattern allows agents to exist independently of the ProviderRegistry,
@@ -116,11 +132,12 @@ class Agent:
         Args:
             config: Agent configuration.
             llm: Pre-resolved LLM instance.
+            tools: Tools to register at construction time.
 
         Returns:
             A new Agent instance.
         """
-        return cls(config, llm=llm)
+        return cls(config, llm=llm, tools=tools)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -205,6 +222,18 @@ class Agent:
             yield
         finally:
             self.rebuild_graph()
+
+    def with_tools(self, *tools: BaseTool) -> Agent:
+        """Register tools and return self for fluent chaining.
+
+        Example::
+
+            agent = Agent.from_llm(config, llm).with_tools(tool1, tool2)
+        """
+        with self.batch_tools():
+            for tool in tools:
+                self.register_tool(tool)
+        return self
 
     @property
     def tools(self) -> list[str]:

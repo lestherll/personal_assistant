@@ -1,9 +1,15 @@
+from __future__ import annotations
+
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import BaseTool
 
 from personal_assistant.core.agent import Agent
+
+if TYPE_CHECKING:
+    from personal_assistant.core.agent import AgentConfig
+    from personal_assistant.providers.registry import ProviderRegistry
 
 
 @dataclass
@@ -51,6 +57,23 @@ class Workspace:
 
     def get_agent(self, name: str) -> Agent | None:
         return self._agents.get(name)
+
+    def get_or_create_agent(self, config: AgentConfig, registry: ProviderRegistry) -> Agent:
+        """Return the existing agent with ``config.name``, or create and add one.
+
+        Args:
+            config: Config for the agent to look up or create.
+            registry: Provider registry used only when creating a new agent.
+
+        Returns:
+            The existing or newly created Agent.
+        """
+        existing = self._agents.get(config.name)
+        if existing is not None:
+            return existing
+        agent = Agent.from_config(config, registry)
+        self.add_agent(agent)
+        return agent
 
     def list_agents(self) -> list[str]:
         return list(self._agents.keys())
