@@ -1,6 +1,7 @@
 # Personal Assistant
 
 [![Tests](https://github.com/lestherll/personal_assistant/actions/workflows/tests.yml/badge.svg)](https://github.com/lestherll/personal_assistant/actions/workflows/tests.yml)
+[![Security](https://github.com/lestherll/personal_assistant/actions/workflows/security.yml/badge.svg)](https://github.com/lestherll/personal_assistant/actions/workflows/security.yml)
 
 A modular AI personal assistant built on [LangChain](https://www.langchain.com/) and [LangGraph](https://www.langchain.com/langgraph). The core idea is configurable AI agents that specialise in specific tasks, grouped into workspaces, backed by a pluggable provider registry — making it easy to swap models, extend with new tools, and expose as an API.
 
