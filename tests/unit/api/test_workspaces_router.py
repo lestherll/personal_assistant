@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 import httpx
 
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
+from personal_assistant.services.views import WorkspaceChatView
 from tests.unit.api.conftest import (
     make_workspace_detail_view,
     make_workspace_view,
@@ -185,3 +186,65 @@ async def test_delete_workspace_not_found_returns_404(
     mock_workspace_service.delete_workspace.side_effect = NotFoundError("workspace", "missing")
     response = await api_client.delete("/workspaces/missing")
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /workspaces/{name}/chat — workspace chat
+# ---------------------------------------------------------------------------
+
+
+async def test_workspace_chat_returns_200(
+    api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
+) -> None:
+    mock_workspace_service.chat.return_value = WorkspaceChatView(
+        response="ok", thread_id="t1", agent_used="Bot"
+    )
+    response = await api_client.post("/workspaces/ws1/chat", json={"message": "hello"})
+    assert response.status_code == 200
+
+
+async def test_workspace_chat_returns_response_body(
+    api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
+) -> None:
+    mock_workspace_service.chat.return_value = WorkspaceChatView(
+        response="ok", thread_id="t1", agent_used="Bot"
+    )
+    response = await api_client.post("/workspaces/ws1/chat", json={"message": "hello"})
+    data = response.json()
+    assert data["response"] == "ok"
+    assert data["thread_id"] == "t1"
+    assert data["agent_used"] == "Bot"
+
+
+async def test_workspace_chat_calls_service(
+    api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
+) -> None:
+    mock_workspace_service.chat.return_value = WorkspaceChatView(
+        response="ok", thread_id="t1", agent_used="Bot"
+    )
+    await api_client.post("/workspaces/ws1/chat", json={"message": "hello"})
+    mock_workspace_service.chat.assert_awaited_once()
+    call_kwargs = mock_workspace_service.chat.call_args.kwargs
+    assert call_kwargs["workspace_name"] == "ws1"
+    assert call_kwargs["message"] == "hello"
+
+
+async def test_workspace_chat_not_found_returns_404(
+    api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
+) -> None:
+    mock_workspace_service.chat.side_effect = NotFoundError("workspace", "missing")
+    response = await api_client.post("/workspaces/missing/chat", json={"message": "hello"})
+    assert response.status_code == 404
+
+
+async def test_workspace_chat_passes_thread_id(
+    api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
+) -> None:
+    mock_workspace_service.chat.return_value = WorkspaceChatView(
+        response="ok", thread_id="my-thread", agent_used="Bot"
+    )
+    await api_client.post(
+        "/workspaces/ws1/chat", json={"message": "hello", "thread_id": "my-thread"}
+    )
+    call_kwargs = mock_workspace_service.chat.call_args.kwargs
+    assert call_kwargs["thread_id"] == "my-thread"

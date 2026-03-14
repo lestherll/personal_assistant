@@ -1,8 +1,10 @@
+from unittest.mock import AsyncMock
+
 import pytest
 
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
-from personal_assistant.services.views import WorkspaceDetailView, WorkspaceView
+from personal_assistant.services.views import WorkspaceChatView, WorkspaceDetailView, WorkspaceView
 from personal_assistant.services.workspace_service import WorkspaceService
 from tests.unit.conftest import make_mock_provider
 from tests.unit.core.test_workspace import make_mock_agent
@@ -115,3 +117,41 @@ class TestDeleteWorkspace:
         service.delete_workspace("ws1")
         assert orchestrator.active_workspace is not None
         assert orchestrator.active_workspace.config.name == "ws2"
+
+
+class TestChatWorkspace:
+    async def test_chat_returns_workspace_chat_view(self, service, orchestrator):
+        service.create_workspace("ws1", "desc")
+        orchestrator.delegate_to_workspace = AsyncMock(return_value=("reply", "t1", "Bot"))
+        view = await service.chat("ws1", "hello")
+        assert isinstance(view, WorkspaceChatView)
+        assert view.response == "reply"
+        assert view.thread_id == "t1"
+        assert view.agent_used == "Bot"
+
+    async def test_chat_raises_not_found_for_missing_workspace(self, service):
+        with pytest.raises(NotFoundError):
+            await service.chat("ghost", "hello")
+
+    async def test_chat_passes_thread_id(self, service, orchestrator):
+        service.create_workspace("ws1", "desc")
+        orchestrator.delegate_to_workspace = AsyncMock(return_value=("reply", "t1", "Bot"))
+        await service.chat("ws1", "hello", thread_id="my-thread")
+        orchestrator.delegate_to_workspace.assert_awaited_once_with(
+            task="hello",
+            workspace_name="ws1",
+            thread_id="my-thread",
+            session=None,
+        )
+
+    async def test_chat_passes_session(self, service, orchestrator):
+        service.create_workspace("ws1", "desc")
+        orchestrator.delegate_to_workspace = AsyncMock(return_value=("reply", "t1", "Bot"))
+        fake_session = object()
+        await service.chat("ws1", "hello", session=fake_session)
+        orchestrator.delegate_to_workspace.assert_awaited_once_with(
+            task="hello",
+            workspace_name="ws1",
+            thread_id=None,
+            session=fake_session,
+        )

@@ -72,7 +72,9 @@ def make_workspace_detail_view(name: str = "ws1") -> WorkspaceDetailView:
 
 @pytest.fixture
 def mock_workspace_service() -> MagicMock:
-    return MagicMock()
+    svc = MagicMock()
+    svc.chat = AsyncMock()
+    return svc
 
 
 @pytest.fixture

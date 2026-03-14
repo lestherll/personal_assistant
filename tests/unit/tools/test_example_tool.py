@@ -12,6 +12,13 @@ class TestEchoTool:
         assert tool._run(message="") == ""
 
 
+class TestAssistantToolArun:
+    async def test_arun_delegates_to_run(self) -> None:
+        tool = EchoTool()
+        result = await tool._arun(message="ping")
+        assert result == "ping"
+
+
 class TestAgentInformationTool:
     def test_run_returns_error_when_config_not_injected(self) -> None:
         tool = AgentInformationTool()
