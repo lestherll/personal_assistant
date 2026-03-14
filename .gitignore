@@ -18,3 +18,14 @@ wheels/
 
 # OS
 .DS_Store
+
+# pytest-cov
+.coverage
+htmlcov/
+
+
+# caches
+.deepeval/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/

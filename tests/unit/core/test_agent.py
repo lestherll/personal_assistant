@@ -13,12 +13,14 @@ def make_tool(name: str = "test_tool") -> BaseTool:
 
 
 class TestAgentCreation:
-    def test_agent_resolves_llm_from_registry(self, agent_config, mock_graph) -> None:
-        registry = MagicMock()
-        registry.get.return_value.get_model.return_value = MagicMock()
+    def test_agent_resolves_llm_from_registry(
+        self, agent_config, mock_registry, mock_provider, mock_graph
+    ) -> None:
         with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
-            Agent(agent_config, registry)
-        registry.get.assert_called_with(agent_config.provider)
+            agent = Agent(agent_config, mock_registry)
+            assert agent.get_llm_info()["source"] == "registry"
+
+        mock_provider.get_model.assert_called_with(agent_config.model)
 
     def test_agent_starts_with_empty_history(self, agent) -> None:
         assert agent.history == []
@@ -180,7 +182,9 @@ class TestAgentConstructorValidation:
         """Test that Agent requires either registry or llm."""
         import pytest
 
-        with pytest.raises(ValueError, match="Either 'registry' or 'llm' must be provided"):
+        with pytest.raises(
+            ValueError, match="Invalid combination of 'registry' and 'llm' arguments"
+        ):
             Agent(agent_config)
 
     def test_accepts_registry(self, agent_config, mock_registry, mock_graph) -> None:

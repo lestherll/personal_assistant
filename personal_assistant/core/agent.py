@@ -70,9 +70,6 @@ class Agent:
         Raises:
             ValueError: If neither registry nor llm is provided.
         """
-        if llm is None and registry is None:
-            raise ValueError("Either 'registry' or 'llm' must be provided")
-
         self.config = config
         self._registry = registry
         self._tools: list[BaseTool] = []
@@ -80,13 +77,7 @@ class Agent:
         self._conversation_id: uuid.UUID | None = None
         self._history_loaded: bool = False
         self._dirty = True  # Track if graph needs rebuild
-
-        if llm is not None:
-            self._llm = llm
-        else:
-            if registry is None:
-                raise ValueError("Registry must be provided if llm is not given")
-            self._llm = registry.get(config.provider).get_model(config.model)
+        self._llm = _get_from_llm_or_registry(config, registry, llm)
 
         for tool in tools or []:
             self.register_tool(tool)
@@ -423,3 +414,18 @@ def _row_to_message(row: MessageRow) -> BaseMessage:
     if row.role == "human":
         return HumanMessage(content=row.content)
     return AIMessage(content=row.content)
+
+
+def _get_from_llm_or_registry(
+    config: AgentConfig,
+    registry: ProviderRegistry | None,
+    llm: BaseChatModel | None,
+) -> BaseChatModel:
+    """Helper to resolve the LLM from either a registry or a direct instance."""
+    match (registry, llm):
+        case (None, BaseChatModel()):
+            return llm
+        case (ProviderRegistry(), None):
+            return registry.get(config.provider).get_model(config.model)
+        case _:
+            raise ValueError("Invalid combination of 'registry' and 'llm' arguments")

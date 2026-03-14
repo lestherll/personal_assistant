@@ -182,22 +182,19 @@ class Orchestrator:
         if workspace is None:
             raise RuntimeError("No active workspace. Create one first.")
 
-        if agent_name:
-            agent = workspace.get_agent(agent_name)
-            if agent is None:
-                raise ValueError(
-                    f"Agent '{agent_name}' not found in workspace '{workspace.config.name}'."
-                )
-        else:
-            agents = workspace.list_agents()
-            if not agents:
+        match (agent_name, workspace.list_agents()):
+            case (None, []):
                 raise RuntimeError(f"No agents in workspace '{workspace.config.name}'.")
-            agent = workspace.get_agent(agents[0])
-
-            # assert agent is not None  # guaranteed: agents[0] came from the same dict
-
-        if agent is None:
-            raise RuntimeError("No agent found to delegate to.")
+            case (None, [first, *_]):
+                agent = workspace.get_agent(first)
+            case (str() as name, _):
+                agent = workspace.get_agent(name)
+                if agent is None:
+                    raise ValueError(
+                        f"Agent '{name}' not found in workspace '{workspace.config.name}'."
+                    )
+            case _:
+                raise RuntimeError("No agent found to delegate to.")
 
         return await agent.run(task, session=session)
 

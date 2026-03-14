@@ -16,10 +16,12 @@ from personal_assistant.providers.registry import ProviderRegistry
 
 
 def make_mock_provider(name: str = "mock") -> AIProvider:
+    from langchain_core.language_models import BaseChatModel
+
     provider = MagicMock(spec=AIProvider)
     provider.name = name
     provider.default_model = "mock-model"
-    provider.get_model.return_value = MagicMock()
+    provider.get_model.return_value = MagicMock(spec=BaseChatModel)
     return provider
 
 
