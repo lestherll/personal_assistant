@@ -36,6 +36,10 @@ class Workspace:
             agent.register_tool(tool)
         self._agents[agent.config.name] = agent
 
+    def add_agents(self, agents: list[Agent]) -> None:
+        for agent in agents:
+            self.add_agent(agent)
+
     def remove_agent(self, name: str) -> None:
         self._agents.pop(name, None)
 

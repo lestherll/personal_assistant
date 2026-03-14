@@ -32,7 +32,7 @@ def workspace(orchestrator):
 
 def _create_agent(service, workspace_name="ws", name="Bot", system_prompt="Be helpful."):
     mock = make_mock_graph()
-    with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
+    with patch("personal_assistant.core.agent.create_agent", return_value=mock):
         return service.create_agent(
             workspace_name,
             name=name,
@@ -97,14 +97,14 @@ class TestUpdateAgent:
     def test_updates_system_prompt(self, service, workspace):
         _create_agent(service)
         mock = make_mock_graph()
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock):
             view = service.update_agent("ws", "Bot", system_prompt="New prompt.")
         assert view.config.system_prompt == "New prompt."
 
     def test_partial_update_preserves_other_fields(self, service, workspace):
         _create_agent(service, system_prompt="Original.")
         mock = make_mock_graph()
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock):
             view = service.update_agent("ws", "Bot", description="Updated desc")
         assert view.config.description == "Updated desc"
         assert view.config.system_prompt == "Original."

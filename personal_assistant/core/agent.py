@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.tools import BaseTool
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -128,10 +128,10 @@ class Agent:
 
     def _build_graph(self) -> Any:
         self._dirty = False
-        return create_react_agent(
+        return create_agent(
             model=self._llm,
             tools=self._tools,
-            prompt=self.config.system_prompt,
+            system_prompt=self.config.system_prompt,
         )
 
     def _ensure_graph(self) -> None:

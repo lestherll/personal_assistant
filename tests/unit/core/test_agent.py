@@ -16,7 +16,7 @@ class TestAgentCreation:
     def test_agent_resolves_llm_from_registry(self, agent_config, mock_graph) -> None:
         registry = MagicMock()
         registry.get.return_value.get_model.return_value = MagicMock()
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             Agent(agent_config, registry)
         registry.get.assert_called_with(agent_config.provider)
 
@@ -30,20 +30,20 @@ class TestAgentCreation:
 class TestToolManagement:
     def test_register_tool(self, agent, mock_graph) -> None:
         tool = make_tool("weather")
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent.register_tool(tool)
         assert "weather" in agent.tools
 
     def test_register_duplicate_tool_ignored(self, agent, mock_graph) -> None:
         tool = make_tool("weather")
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent.register_tool(tool)
             agent.register_tool(tool)
         assert agent.tools.count("weather") == 1
 
     def test_remove_tool(self, agent, mock_graph) -> None:
         tool = make_tool("weather")
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent.register_tool(tool)
             agent.remove_tool("weather")
         assert "weather" not in agent.tools
@@ -55,7 +55,7 @@ class TestToolManagement:
             system_prompt="You are restricted.",
             allowed_tools=["allowed_tool"],
         )
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent = Agent(config, mock_registry)
             agent.register_tool(make_tool("allowed_tool"))
             agent.register_tool(make_tool("blocked_tool"))
@@ -63,7 +63,7 @@ class TestToolManagement:
         assert "blocked_tool" not in agent.tools
 
     def test_empty_allowed_tools_accepts_all(self, agent, mock_graph) -> None:
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent.register_tool(make_tool("tool_a"))
             agent.register_tool(make_tool("tool_b"))
         assert "tool_a" in agent.tools
@@ -71,14 +71,14 @@ class TestToolManagement:
 
     def test_register_tool_injects_agent_config(self, agent, mock_graph) -> None:
         tool = AgentInformationTool()
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent.register_tool(tool)
         registered = next(t for t in agent._tools if t.name == "agent_info")
         assert registered.agent_config == agent.config
 
     def test_register_tool_does_not_mutate_original(self, agent, mock_graph) -> None:
         tool = AgentInformationTool()
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent.register_tool(tool)
         assert tool.agent_config is None
 
@@ -87,7 +87,7 @@ class TestToolManagement:
     ) -> None:
         tool = AgentInformationTool()
         config_b = AgentConfig(name="AgentB", description="Agent B", system_prompt="You are B.")
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent_a = Agent(agent_config, mock_registry)
             agent_b = Agent(config_b, mock_registry)
             agent_a.register_tool(tool)
@@ -156,7 +156,7 @@ class TestAgentFactoryMethods:
 
     def test_from_config_creates_agent(self, agent_config, mock_registry, mock_graph) -> None:
         """Test that from_config creates an agent with registry."""
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent = Agent.from_config(agent_config, mock_registry)
         assert agent.config == agent_config
         assert agent._registry == mock_registry
@@ -166,7 +166,7 @@ class TestAgentFactoryMethods:
         from langchain_core.language_models import BaseChatModel
 
         mock_llm = MagicMock(spec=BaseChatModel)
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent = Agent.from_llm(agent_config, mock_llm)
         assert agent.config == agent_config
         assert agent._llm == mock_llm
@@ -185,7 +185,7 @@ class TestAgentConstructorValidation:
 
     def test_accepts_registry(self, agent_config, mock_registry, mock_graph) -> None:
         """Test that Agent accepts registry parameter."""
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent = Agent(agent_config, registry=mock_registry)
         assert agent._registry == mock_registry
 
@@ -194,7 +194,7 @@ class TestAgentConstructorValidation:
         from langchain_core.language_models import BaseChatModel
 
         mock_llm = MagicMock(spec=BaseChatModel)
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent = Agent(agent_config, llm=mock_llm)
         assert agent._llm == mock_llm
 
@@ -221,7 +221,7 @@ class TestDeferredGraphRebuild:
         """Test that _ensure_graph rebuilds graph when dirty."""
         agent._dirty = True
         new_graph = MagicMock()
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=new_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=new_graph):
             agent._ensure_graph()
         assert agent._graph == new_graph
         assert agent._dirty is False
@@ -240,7 +240,7 @@ class TestGetLlmInfo:
     def test_registry_path_returns_config_values(
         self, agent_config, mock_registry, mock_graph
     ) -> None:
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent = Agent(agent_config, mock_registry)
         info = agent.get_llm_info()
         assert info["source"] == "registry"
@@ -252,7 +252,7 @@ class TestGetLlmInfo:
 
         mock_llm = MagicMock(spec=BaseChatModel)
         mock_llm.model = "test-model"
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent = Agent.from_llm(agent_config, mock_llm)
         info = agent.get_llm_info()
         assert info["source"] == "direct"
@@ -266,7 +266,7 @@ class TestSetLlm:
     def test_set_llm_replaces_llm(self, agent_config, mock_registry, mock_graph) -> None:
         from langchain_core.language_models import BaseChatModel
 
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent = Agent(agent_config, mock_registry)
             new_llm = MagicMock(spec=BaseChatModel)
             agent.set_llm(new_llm)
@@ -275,7 +275,7 @@ class TestSetLlm:
     def test_set_llm_clears_registry(self, agent_config, mock_registry, mock_graph) -> None:
         from langchain_core.language_models import BaseChatModel
 
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent = Agent(agent_config, mock_registry)
             agent.set_llm(MagicMock(spec=BaseChatModel))
         assert agent._registry is None
@@ -283,11 +283,11 @@ class TestSetLlm:
     def test_set_llm_rebuilds_graph(self, agent_config, mock_registry, mock_graph) -> None:
         from langchain_core.language_models import BaseChatModel
 
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent = Agent(agent_config, mock_registry)
             original_graph = agent._graph
             new_graph = MagicMock()
-            with patch("personal_assistant.core.agent.create_react_agent", return_value=new_graph):
+            with patch("personal_assistant.core.agent.create_agent", return_value=new_graph):
                 agent.set_llm(MagicMock(spec=BaseChatModel))
         assert agent._graph is new_graph
         assert agent._graph is not original_graph
@@ -305,7 +305,7 @@ class TestBatchTools:
         agent._dirty = False
         initial_graph = agent._graph
 
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=new_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=new_graph):
             with agent.batch_tools():
                 agent.register_tool(tool1)
                 agent.register_tool(tool2)
@@ -322,7 +322,7 @@ class TestBatchTools:
         tool = make_tool("single_tool")
         new_graph = MagicMock()
 
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=new_graph):
+        with patch("personal_assistant.core.agent.create_agent", return_value=new_graph):
             with agent.batch_tools():
                 agent.register_tool(tool)
 

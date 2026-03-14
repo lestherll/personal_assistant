@@ -20,6 +20,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "deepeval>=0.21.76",
     "httpx>=0.28.1",
     "mypy>=1.19.1",
     "pytest>=9.0.2",
@@ -31,6 +32,10 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+addopts = "-m 'not evaluation'"
+markers = [
+    "evaluation: LLM evaluation tests (require local Ollama, skipped in CI)",
+]
 
 [tool.ruff]
 target-version = "py313"

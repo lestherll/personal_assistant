@@ -123,7 +123,7 @@ class TestAgentHelpers:
         orchestrator.create_workspace(workspace_config)
         config = AgentConfig(name="NewBot", description="", system_prompt="Be helpful.")
         mock = make_mock_graph()
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock):
             orchestrator.create_agent(config)
         assert "NewBot" in orchestrator.active_workspace.list_agents()
 
@@ -135,7 +135,7 @@ class TestAgentHelpers:
         orchestrator.active_workspace.add_agent(old_agent)
         config = AgentConfig(name="Bot", description="", system_prompt="New prompt.")
         mock = make_mock_graph()
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock):
             orchestrator.replace_agent(config)
         # A new Agent instance replaced the mock — verify it's no longer the old mock
         assert orchestrator.active_workspace.get_agent("Bot") is not old_agent
@@ -151,7 +151,7 @@ class TestUnmanagedAgent:
         """Test that create_unmanaged_agent returns an Agent instance."""
         config = AgentConfig(name="StandaloneBot", description="", system_prompt="Be helpful.")
         mock = make_mock_graph()
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock):
             agent = orchestrator.create_unmanaged_agent(config)
         assert agent is not None
         assert agent.config.name == "StandaloneBot"
@@ -161,7 +161,7 @@ class TestUnmanagedAgent:
         orchestrator.create_workspace(workspace_config)
         config = AgentConfig(name="LonelyBot", description="", system_prompt="Be helpful.")
         mock = make_mock_graph()
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock):
             orchestrator.create_unmanaged_agent(config)
         # Agent should exist but not be in the active workspace
         assert orchestrator.active_workspace is not None
@@ -171,7 +171,7 @@ class TestUnmanagedAgent:
         """Test that unmanaged agent can be created without any workspace."""
         config = AgentConfig(name="IndependentBot", description="", system_prompt="Be helpful.")
         mock = make_mock_graph()
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock):
             agent = orchestrator.create_unmanaged_agent(config)
         assert agent is not None
         # No active workspace should exist
@@ -181,7 +181,7 @@ class TestUnmanagedAgent:
         """Test that unmanaged agent uses the orchestrator's registry."""
         config = AgentConfig(name="RegistryBot", description="", system_prompt="Be helpful.")
         mock = make_mock_graph()
-        with patch("personal_assistant.core.agent.create_react_agent", return_value=mock):
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock):
             agent = orchestrator.create_unmanaged_agent(config)
         # Agent should have access to the registry
         assert agent._registry is orchestrator.registry

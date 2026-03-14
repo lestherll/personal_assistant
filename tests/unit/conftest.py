@@ -78,5 +78,5 @@ def mock_graph() -> MagicMock:
 def agent(
     agent_config: AgentConfig, mock_registry: ProviderRegistry, mock_graph: MagicMock
 ) -> Agent:
-    with patch("personal_assistant.core.agent.create_react_agent", return_value=mock_graph):
+    with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
         return Agent(agent_config, mock_registry)

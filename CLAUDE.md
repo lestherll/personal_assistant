@@ -7,7 +7,7 @@ A modular AI personal assistant built on LangChain and LangGraph. The core conce
 ## Stack
 
 - **Python 3.13**, managed with **uv**
-- **LangChain** + **LangGraph** — agent orchestration (ReAct loop via `create_react_agent`)
+- **LangChain** + **LangGraph** — agent orchestration (ReAct loop via `create_agent`)
 - **langchain-anthropic** — Anthropic/Claude provider
 - **langchain-ollama** — Ollama local provider
 - **python-dotenv** — `.env` loading
@@ -68,8 +68,12 @@ tests/
 │   ├── services/             # Tests for workspace_service, agent_service
 │   ├── tools/                # Tests for individual tools
 │   └── api/                  # Unit tests for routers, dependencies, exception handlers
-└── functional/
-    └── api/                  # End-to-end API tests (httpx AsyncClient against live app)
+├── functional/
+│   └── api/                  # End-to-end API tests (httpx AsyncClient against live app)
+└── evaluation/
+    ├── conftest.py           # DeepEval judge fixture (Ollama-backed)
+    └── api/
+        └── test_chat.py      # Evaluation tests for chat endpoints (AnswerRelevancy, GEval, Toxicity)
 main.py                       # REPL entry point — bootstraps registry, orchestrator
 ```
 
@@ -96,6 +100,9 @@ FastAPI app in `api/`. Routers for `/workspaces` and `/agents` delegate to `Work
 ### Persistence (optional)
 Async SQLAlchemy + asyncpg backed by PostgreSQL. `Conversation` and `Message` ORM models live in `persistence/models.py`. `ConversationRepository` handles all DB access. Set `DATABASE_URL` to enable; omit it to run in-memory only. Use Alembic for migrations.
 
+### Evaluation (optional)
+DeepEval-based evaluation tests for chat endpoints. Located in `tests/evaluation/api/test_chat.py`. Tests use an Ollama-backed judge model (`qwen2.5:14b`) to evaluate LLM responses for relevancy, correctness, and toxicity. Run with `uv run pytest -m evaluation tests/evaluation/` (requires local Ollama running at `http://localhost:11434`). Streaming endpoints use SSE with raw text tokens and `[DONE]` sentinel; non-streaming endpoints use JSON request/response format. Use `timeout=120.0` when making requests to LLM-backed endpoints to avoid timeout errors.
+
 ## Environment
 
 Copy `.env.example` to `.env` and set:
@@ -109,13 +116,15 @@ Ollama runs locally at `http://localhost:11434`. Pull models with `ollama pull <
 ## Commands
 
 ```bash
-uv run python main.py              # Start the REPL
-uv run fastapi dev api/main.py     # Start the REST API (dev mode)
-uv add <package>                   # Add a dependency
-uv run pytest                      # Run all tests (unit + functional)
-uv run ruff check .                # Lint
-uv run ruff format .               # Format
-uv run mypy . --exclude tests      # Type-check
+uv run python main.py                          # Start the REPL
+uv run fastapi dev api/main.py                 # Start the REST API (dev mode)
+uv add <package>                               # Add a dependency
+uv run pytest                                  # Run unit + functional tests (evaluation skipped by default)
+uv run pytest tests/                           # Run unit + functional tests (evaluation skipped by default)
+uv run pytest -m evaluation tests/evaluation/  # Run evaluation tests only (requires local Ollama)
+uv run ruff check .                            # Lint
+uv run ruff format .                           # Format
+uv run mypy . --exclude tests                  # Type-check
 ```
 
 ## Conventions

@@ -47,8 +47,7 @@ class AgentInformationTool(AssistantTool[str]):
             "Error: agent_config was not injected."
             if self.agent_config is None
             else agent_info_template.format(
-                name=self.agent_config.name,
-                description=self.agent_config.description
+                name=self.agent_config.name, description=self.agent_config.description
             )
         )
         print(f"AgentInformationTool._run called. Returning agent info:\n{agent_info}")
