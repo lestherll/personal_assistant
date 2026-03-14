@@ -23,6 +23,7 @@ dev = [
     "deepeval>=0.21.76",
     "httpx>=0.28.1",
     "mypy>=1.19.1",
+    "pre-commit>=4.0",
     "pytest>=9.0.2",
     "pytest-asyncio>=0.24",
     "pytest-mock>=3.15.1",
