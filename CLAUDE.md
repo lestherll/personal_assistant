@@ -30,14 +30,18 @@ personal_assistant/
 │   ├── agent.py          # Agent + AgentConfig — LangGraph ReAct agent with history
 │   ├── tool.py           # AssistantTool base class (extends LangChain BaseTool)
 │   ├── workspace.py      # Workspace + WorkspaceConfig — groups agents + tools
-│   └── orchestrator.py   # Orchestrator — manages registry, workspaces, task routing
+│   ├── orchestrator.py   # Orchestrator — manages registry, workspaces, task routing
+│   └── supervisor.py     # WorkspaceSupervisor — LangGraph StateGraph routing messages to agents
 ├── providers/
 │   ├── base.py           # AIProvider + ProviderConfig abstract base
 │   ├── registry.py       # ProviderRegistry — named provider lookup + default
 │   ├── anthropic.py      # AnthropicProvider (ChatAnthropic)
 │   └── ollama.py         # OllamaProvider (ChatOllama, local)
 ├── agents/
-│   └── assistant_agent.py  # AssistantAgent — general-purpose starter agent
+│   ├── assistant_agent.py    # AssistantAgent — general-purpose starter agent
+│   ├── career_agent.py       # CareerAgent — resume/cover letter/interview prep
+│   ├── coding_agent.py       # PythonCodingAgent — Python coding, debugging, code review
+│   └── research_agent.py     # GeneralResearchAgent — article summarisation, Q&A
 ├── tools/
 │   └── example_tool.py     # EchoTool, AgentInformationTool — tool examples/templates
 ├── workspaces/
@@ -47,11 +51,13 @@ personal_assistant/
 │   ├── models.py         # ORM models: Conversation, Message (PostgreSQL + JSONB)
 │   └── repository.py     # ConversationRepository — data-access layer
 └── services/
-    ├── agent_service.py      # AgentService — CRUD + run/stream/reset helpers
-    ├── workspace_service.py  # WorkspaceService — CRUD over orchestrator workspaces
-    ├── schemas.py            # Pydantic request models (Create/Update/Chat)
-    ├── views.py              # Dataclass response views (AgentView, WorkspaceView, …)
-    └── exceptions.py         # NotFoundError, AlreadyExistsError, ServiceValidationError
+    ├── agent_service.py          # AgentService — CRUD + run/stream/reset helpers
+    ├── workspace_service.py      # WorkspaceService — CRUD over orchestrator workspaces
+    ├── conversation_pool.py      # ConversationPool — LRU in-memory pool of per-conversation agent clones
+    ├── conversation_service.py   # ConversationService — get/create clones, cold-start from DB
+    ├── schemas.py                # Pydantic request models (Create/Update/Chat)
+    ├── views.py                  # Dataclass response views (AgentView, WorkspaceView, …)
+    └── exceptions.py             # NotFoundError, AlreadyExistsError, ServiceValidationError
 api/
 ├── main.py               # FastAPI app — lifespan bootstrap, router registration
 ├── dependencies.py       # FastAPI dependency injection (orchestrator, session factory)
@@ -59,13 +65,14 @@ api/
 ├── schemas.py            # API-level Pydantic request/response schemas
 └── routers/
     ├── agents.py         # /agents/** endpoints
-    └── workspaces.py     # /workspaces/** endpoints
+    ├── workspaces.py     # /workspaces/** endpoints
+    └── params.py         # Reusable annotated Path params (WorkspaceName, AgentName)
 tests/
 ├── unit/
 │   ├── conftest.py           # Shared fixtures
-│   ├── core/                 # Tests for agent, workspace, orchestrator
+│   ├── core/                 # Tests for agent, workspace, orchestrator, supervisor
 │   ├── providers/            # Tests for provider registry
-│   ├── services/             # Tests for workspace_service, agent_service
+│   ├── services/             # Tests for workspace_service, agent_service, conversation_pool, conversation_service
 │   ├── tools/                # Tests for individual tools
 │   └── api/                  # Unit tests for routers, dependencies, exception handlers
 ├── functional/
@@ -73,7 +80,8 @@ tests/
 └── evaluation/
     ├── conftest.py           # DeepEval judge fixture (Ollama-backed)
     └── api/
-        └── test_chat.py      # Evaluation tests for chat endpoints (AnswerRelevancy, GEval, Toxicity)
+        ├── test_chat.py            # Evaluation tests for agent chat endpoints
+        └── test_workspace_chat.py  # Evaluation tests for workspace chat endpoint
 main.py                       # REPL entry point — bootstraps registry, orchestrator
 ```
 
@@ -86,7 +94,16 @@ Registered in a `ProviderRegistry` by name. Each provider wraps a LangChain chat
 Created from `AgentConfig` (name, description, system_prompt, provider, model, allowed_tools). Maintain their own conversation history across turns. Rebuilt automatically when tools are added/removed.
 
 ### Workspaces
-Named containers for agents and tools. Tools added to a workspace are auto-registered with all compatible agents. Supports `add_agent`, `remove_agent`, `replace_agent`, `add_tool`, `remove_tool`.
+Named containers for agents and tools. Tools added to a workspace are auto-registered with all compatible agents. Supports `add_agent`, `remove_agent`, `replace_agent`, `add_tool`, `remove_tool`. Each workspace owns a `WorkspaceSupervisor` that routes workspace-level chat to the most suitable agent.
+
+### Supervisor
+`WorkspaceSupervisor` (`core/supervisor.py`) builds a LangGraph `StateGraph` with a supervisor node and one node per agent. The supervisor LLM picks the target agent; conversation state is persisted across turns via LangGraph's `MemorySaver` checkpointer, keyed by `thread_id`. Call `supervisor.run(message, thread_id)` → `(response, thread_id, agent_used)`. `rebuild(agents)` re-compiles the graph when the agent roster changes.
+
+### ConversationPool
+`ConversationPool` (`services/conversation_pool.py`) is an in-memory LRU pool of per-conversation `Agent` clones, keyed by `(workspace_name, agent_name, conversation_id)`. Evicts the least-recently-used entry when `max_size` is reached and supports TTL-based expiry via `evict_expired()`.
+
+### ConversationService
+`ConversationService` (`services/conversation_service.py`) manages agent clones for individual conversations. On a pool hit it returns the existing clone; for new conversations it clones the template and optionally persists via the DB; for cold-starts (known `conversation_id`, pool miss) it validates against the DB and rebuilds the clone.
 
 ### Orchestrator
 Owns the `ProviderRegistry` and all workspaces. Routes tasks via `delegate(task, agent_name, workspace_name, session=...)`. Helpers: `create_agent(config)`, `replace_agent(config)`, `create_workspace(config)`, `remove_workspace(name)`.
@@ -130,10 +147,10 @@ uv run mypy . --exclude tests                  # Type-check
 ## Conventions
 
 - New tools: subclass `AssistantTool` in `personal_assistant/tools/`, define `name`, `description`, `args_schema` (Pydantic model), and `_run()`. To give a tool access to the calling agent's `AgentConfig`, add an `agent_config: AgentConfig | None = None` field — `Agent.register_tool` detects this via `model_fields` and injects a copy automatically via `model_copy`, so each agent gets its own bound instance and the original tool is never mutated.
-- New agents: subclass `Agent` or use `AgentConfig` directly with `orchestrator.create_agent()`. Use `AgentService` when calling from service/API layers.
+- New agents: subclass `Agent` (see `career_agent.py`, `coding_agent.py`, `research_agent.py` for examples) or use `AgentConfig` directly with `orchestrator.create_agent()`. Use `AgentService` when calling from service/API layers.
 - New providers: subclass `AIProvider` in `personal_assistant/providers/`, implement `get_model()`, register in `main.py`.
 - New workspaces: add a factory function in `personal_assistant/workspaces/`. Use `WorkspaceService` when calling from service/API layers.
-- New API endpoints: add a router in `api/routers/`, include it in `api/main.py`, and add any new service exceptions to `api/exception_handlers.py`.
+- New API endpoints: add a router in `api/routers/`, include it in `api/main.py`, and add any new service exceptions to `api/exception_handlers.py`. Reuse or extend annotated path parameters from `api/routers/params.py`.
 - Do not hardcode API keys — always use `.env`.
 - Agent conversation history persists per agent instance. Call `agent.reset()` or `AgentService.reset_agent()` to clear.
 - `DATABASE_URL` is optional. When absent, the app runs fully in-memory with no persistence.
