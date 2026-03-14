@@ -197,7 +197,7 @@ async def test_workspace_chat_returns_200(
     api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
 ) -> None:
     mock_workspace_service.chat.return_value = WorkspaceChatView(
-        response="ok", thread_id="t1", agent_used="Bot"
+        response="ok", conversation_id="t1", agent_used="Bot"
     )
     response = await api_client.post("/workspaces/ws1/chat", json={"message": "hello"})
     assert response.status_code == 200
@@ -207,12 +207,12 @@ async def test_workspace_chat_returns_response_body(
     api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
 ) -> None:
     mock_workspace_service.chat.return_value = WorkspaceChatView(
-        response="ok", thread_id="t1", agent_used="Bot"
+        response="ok", conversation_id="t1", agent_used="Bot"
     )
     response = await api_client.post("/workspaces/ws1/chat", json={"message": "hello"})
     data = response.json()
     assert data["response"] == "ok"
-    assert data["thread_id"] == "t1"
+    assert data["conversation_id"] == "t1"
     assert data["agent_used"] == "Bot"
 
 
@@ -220,7 +220,7 @@ async def test_workspace_chat_calls_service(
     api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
 ) -> None:
     mock_workspace_service.chat.return_value = WorkspaceChatView(
-        response="ok", thread_id="t1", agent_used="Bot"
+        response="ok", conversation_id="t1", agent_used="Bot"
     )
     await api_client.post("/workspaces/ws1/chat", json={"message": "hello"})
     mock_workspace_service.chat.assert_awaited_once()
@@ -237,14 +237,91 @@ async def test_workspace_chat_not_found_returns_404(
     assert response.status_code == 404
 
 
-async def test_workspace_chat_passes_thread_id(
+async def test_workspace_chat_passes_conversation_id(
     api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
 ) -> None:
     mock_workspace_service.chat.return_value = WorkspaceChatView(
-        response="ok", thread_id="my-thread", agent_used="Bot"
+        response="ok", conversation_id="my-thread", agent_used="Bot"
     )
     await api_client.post(
-        "/workspaces/ws1/chat", json={"message": "hello", "thread_id": "my-thread"}
+        "/workspaces/ws1/chat", json={"message": "hello", "conversation_id": "my-thread"}
     )
     call_kwargs = mock_workspace_service.chat.call_args.kwargs
-    assert call_kwargs["thread_id"] == "my-thread"
+    assert call_kwargs["conversation_id"] == "my-thread"
+
+
+async def test_workspace_chat_passes_agent_name(
+    api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
+) -> None:
+    mock_workspace_service.chat.return_value = WorkspaceChatView(
+        response="ok", conversation_id="t1", agent_used="Assistant"
+    )
+    await api_client.post(
+        "/workspaces/ws1/chat", json={"message": "hello", "agent_name": "Assistant"}
+    )
+    call_kwargs = mock_workspace_service.chat.call_args.kwargs
+    assert call_kwargs["agent_name"] == "Assistant"
+
+
+async def test_workspace_chat_passes_provider_and_model(
+    api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
+) -> None:
+    mock_workspace_service.chat.return_value = WorkspaceChatView(
+        response="ok", conversation_id="t1", agent_used="Assistant"
+    )
+    await api_client.post(
+        "/workspaces/ws1/chat",
+        json={
+            "message": "hello",
+            "agent_name": "Assistant",
+            "provider": "anthropic",
+            "model": "claude-haiku-4-5-20251001",
+        },
+    )
+    call_kwargs = mock_workspace_service.chat.call_args.kwargs
+    assert call_kwargs["provider"] == "anthropic"
+    assert call_kwargs["model"] == "claude-haiku-4-5-20251001"
+
+
+async def test_workspace_chat_validation_error_returns_422(
+    api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
+) -> None:
+    from personal_assistant.services.exceptions import ServiceValidationError
+
+    mock_workspace_service.chat.side_effect = ServiceValidationError(
+        "provider/model override requires agent_name"
+    )
+    response = await api_client.post(
+        "/workspaces/ws1/chat", json={"message": "hello", "provider": "anthropic"}
+    )
+    assert response.status_code == 422
+
+
+async def test_workspace_chat_stream_returns_streaming_response(
+    api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
+) -> None:
+    async def fake_tokens():
+        yield "Hello"
+        yield " world"
+
+    mock_workspace_service.stream_chat.return_value = (fake_tokens(), "conv-123", "Bot")
+    response = await api_client.post(
+        "/workspaces/ws1/chat/stream",
+        json={"message": "hello", "agent_name": "Bot"},
+    )
+    assert response.status_code == 200
+    assert "text/event-stream" in response.headers["content-type"]
+    assert response.headers["x-conversation-id"] == "conv-123"
+    assert response.headers["x-agent-used"] == "Bot"
+
+
+async def test_workspace_chat_stream_validation_error_returns_422(
+    api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
+) -> None:
+    from personal_assistant.services.exceptions import ServiceValidationError
+
+    mock_workspace_service.stream_chat.side_effect = ServiceValidationError(
+        "stream_chat requires agent_name"
+    )
+    response = await api_client.post("/workspaces/ws1/chat/stream", json={"message": "hello"})
+    assert response.status_code == 422

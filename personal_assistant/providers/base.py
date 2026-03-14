@@ -41,6 +41,14 @@ class AIProvider(ABC):
         """
         ...
 
+    async def list_models(self) -> list[str]:
+        """Return a list of available model names for this provider.
+
+        Subclasses may override this to query the backend dynamically.
+        The default implementation returns only the configured default model.
+        """
+        return [self.default_model]
+
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}(name={self.name!r}, default_model={self.default_model!r})"

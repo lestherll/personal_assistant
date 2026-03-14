@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 from langchain_core.language_models import BaseChatModel
 
 from personal_assistant.providers.anthropic import AnthropicConfig, AnthropicProvider
@@ -38,6 +39,12 @@ class TestAIProviderBase:
         r = repr(provider)
         assert "test-provider" in r
         assert "my-model" in r
+
+    async def test_list_models_default_returns_default_model(self):
+        config = ProviderConfig(name="test-provider", default_model="my-model")
+        provider = ConcreteProvider(config)
+        models = await provider.list_models()
+        assert models == ["my-model"]
 
 
 # ---------------------------------------------------------------------------
@@ -104,6 +111,18 @@ class TestAnthropicProvider:
             call_kwargs = mock_cls.call_args.kwargs
         assert call_kwargs["max_tokens"] == 1024
 
+    async def test_list_models_returns_known_claude_models(self):
+        provider = AnthropicProvider(AnthropicConfig(api_key="sk-test"))
+        models = await provider.list_models()
+        assert "claude-sonnet-4-6" in models
+        assert "claude-opus-4-6" in models
+        assert len(models) > 1
+
+    async def test_list_models_includes_default_model(self):
+        provider = AnthropicProvider(AnthropicConfig(api_key="sk-test"))
+        models = await provider.list_models()
+        assert provider.default_model in models
+
 
 # ---------------------------------------------------------------------------
 # OllamaProvider
@@ -134,3 +153,55 @@ class TestOllamaProvider:
             provider.get_model(temperature=0.5)
             call_kwargs = mock_cls.call_args.kwargs
         assert call_kwargs["temperature"] == 0.5
+
+    async def test_list_models_queries_ollama_api(self):
+        provider = OllamaProvider(OllamaConfig())
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"models": [{"name": "llama3.2"}, {"name": "qwen2.5"}]}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        with patch(
+            "personal_assistant.providers.ollama.httpx.AsyncClient", return_value=mock_client
+        ):
+            models = await provider.list_models()
+
+        assert "llama3.2" in models
+        assert "qwen2.5" in models
+
+    async def test_list_models_falls_back_on_error(self):
+        provider = OllamaProvider(OllamaConfig())
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
+
+        with patch(
+            "personal_assistant.providers.ollama.httpx.AsyncClient", return_value=mock_client
+        ):
+            models = await provider.list_models()
+
+        assert models == [provider.default_model]
+
+    async def test_list_models_falls_back_on_empty_response(self):
+        provider = OllamaProvider(OllamaConfig())
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"models": []}
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        with patch(
+            "personal_assistant.providers.ollama.httpx.AsyncClient", return_value=mock_client
+        ):
+            models = await provider.list_models()
+
+        assert models == [provider.default_model]

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_db_session, get_workspace_service
@@ -74,11 +76,46 @@ async def workspace_chat(
     view = await service.chat(
         workspace_name=name,
         message=body.message,
-        thread_id=body.thread_id,
+        conversation_id=body.conversation_id,
+        agent_name=body.agent_name,
+        provider=body.provider,
+        model=body.model,
         session=db,
     )
     return WorkspaceChatResponse(
         response=view.response,
-        thread_id=view.thread_id,
+        conversation_id=view.conversation_id,
         agent_used=view.agent_used,
+    )
+
+
+@router.post("/{name}/chat/stream")
+async def workspace_chat_stream(
+    name: WorkspaceName,
+    body: WorkspaceChatRequest,
+    service: WorkspaceServiceDep,
+    db: DbSessionDep,
+) -> StreamingResponse:
+    token_iter, conversation_id, agent_used = await service.stream_chat(
+        workspace_name=name,
+        message=body.message,
+        conversation_id=body.conversation_id,
+        agent_name=body.agent_name,
+        provider=body.provider,
+        model=body.model,
+        session=db,
+    )
+
+    async def event_generator() -> AsyncIterator[str]:
+        async for token in token_iter:
+            yield f"data: {token}\n\n"
+        yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "X-Conversation-Id": conversation_id,
+            "X-Agent-Used": agent_used,
+        },
     )

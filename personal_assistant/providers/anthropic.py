@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, ClassVar
 
 from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
@@ -24,6 +24,21 @@ class AnthropicProvider(AIProvider):
     def __init__(self, config: AnthropicConfig | None = None) -> None:
         super().__init__(config or AnthropicConfig())
         self.config: AnthropicConfig
+
+    _KNOWN_MODELS: ClassVar[list[str]] = [
+        "claude-opus-4-6",
+        "claude-sonnet-4-6",
+        "claude-haiku-4-5-20251001",
+        "claude-opus-4-5",
+        "claude-sonnet-4-5",
+        "claude-haiku-4-5",
+        "claude-3-5-sonnet-20241022",
+        "claude-3-5-haiku-20241022",
+        "claude-3-opus-20240229",
+    ]
+
+    async def list_models(self) -> list[str]:
+        return list(self._KNOWN_MODELS)
 
     def get_model(self, model: str | None = None, **kwargs: Any) -> BaseChatModel:
         raw_key = self.config.api_key or os.getenv("ANTHROPIC_API_KEY")

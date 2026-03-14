@@ -380,3 +380,22 @@ class TestClone:
         clone1 = agent.clone()
         clone2 = agent.clone()
         assert clone1 is not clone2
+
+    def test_clone_with_llm_override_uses_new_llm(self, agent) -> None:
+        from langchain_core.language_models import BaseChatModel
+
+        override_llm = MagicMock(spec=BaseChatModel)
+        clone = agent.clone(llm=override_llm)
+        assert clone._llm is override_llm
+
+    def test_clone_with_llm_override_does_not_affect_template(self, agent) -> None:
+        from langchain_core.language_models import BaseChatModel
+
+        original_llm = agent._llm
+        override_llm = MagicMock(spec=BaseChatModel)
+        agent.clone(llm=override_llm)
+        assert agent._llm is original_llm
+
+    def test_clone_without_llm_uses_template_llm(self, agent) -> None:
+        clone = agent.clone()
+        assert clone._llm is agent._llm

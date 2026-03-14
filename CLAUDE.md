@@ -67,7 +67,8 @@ api/
 ├── schemas.py            # API-level Pydantic request/response schemas
 └── routers/
     ├── agents.py         # /agents/** endpoints (including conversation list/delete)
-    ├── workspaces.py     # /workspaces/** endpoints
+    ├── workspaces.py     # /workspaces/** endpoints (chat + streaming)
+    ├── providers.py      # /providers/** endpoints (discovery)
     └── params.py         # Reusable annotated Path params (WorkspaceName, AgentName)
 tests/
 ├── unit/
@@ -94,7 +95,7 @@ main.py                       # REPL entry point — bootstraps registry, orches
 `personal_assistant/bootstrap.py` exports `build_registry() -> ProviderRegistry`, which registers `AnthropicProvider` and `OllamaProvider` (set as default). Both `main.py` (REPL) and `api/main.py` call this function; do not duplicate registration elsewhere.
 
 ### Providers
-Registered in a `ProviderRegistry` by name. Each provider wraps a LangChain chat model and exposes `get_model(model, **kwargs)`. Add new providers by subclassing `AIProvider`.
+Registered in a `ProviderRegistry` by name. Each provider wraps a LangChain chat model and exposes `get_model(model, **kwargs)` and `async list_models() -> list[str]`. The default `list_models()` implementation returns `[default_model]`; concrete providers override it to return the full set of supported models (`AnthropicProvider` returns a hardcoded list; `OllamaProvider` queries the local `/api/tags` endpoint and falls back to `[default_model]` on error). Add new providers by subclassing `AIProvider`.
 
 ### Agents
 Created from `AgentConfig` (name, description, system_prompt, provider, model, allowed_tools). Maintain their own conversation history across turns. Rebuilt automatically when tools are added/removed.
@@ -107,13 +108,15 @@ Named containers for agents and tools. Tools added to a workspace are auto-regis
 - Agent-private tools can be registered via `add_tool_to_agent(agent_name, tool)` — they are not shared with other agents and do not appear in `list_tools()`.
 
 ### Supervisor
-`WorkspaceSupervisor` (`core/supervisor.py`) builds a LangGraph `StateGraph` with a supervisor node and one node per agent. The supervisor LLM picks the target agent; conversation state is persisted across turns via LangGraph's `MemorySaver` checkpointer, keyed by `thread_id`. Call `supervisor.run(message, thread_id)` → `(response, thread_id, agent_used)`. `rebuild(agents)` re-compiles the graph when the agent roster changes.
+`WorkspaceSupervisor` (`core/supervisor.py`) builds a LangGraph `StateGraph` with a supervisor node and one node per agent. The supervisor LLM picks the target agent; conversation state is persisted across turns via LangGraph's `MemorySaver` checkpointer, keyed by `thread_id` (an internal string key). Call `supervisor.run(message, thread_id)` → `(response, thread_id, agent_used)`. `rebuild(agents)` re-compiles the graph when the agent roster changes. At the API level the `thread_id` is exposed as `conversation_id`.
 
 ### ConversationPool
 `ConversationPool` (`services/conversation_pool.py`) is an in-memory LRU pool of per-conversation `Agent` clones, keyed by `(workspace_name, agent_name, conversation_id)`. Evicts the least-recently-used entry when `max_size` is reached and supports TTL-based expiry via `evict_expired()`.
 
 ### ConversationService
 `ConversationService` (`services/conversation_service.py`) manages agent clones for individual conversations. On a pool hit it returns the existing clone; for new conversations it clones the template and optionally persists via the DB; for cold-starts (known `conversation_id`, pool miss) it validates against the DB and rebuilds the clone.
+
+`get_or_create_clone()` accepts an optional `llm_override: BaseChatModel | None` keyword argument. When set, the clone uses the given LLM instead of the template's LLM, skips the pool entirely (ephemeral per-turn clone), and still creates a DB conversation row when a session is available. This supports per-request model overrides without polluting the pool.
 
 ### Orchestrator
 Owns the `ProviderRegistry` and all workspaces. Routes tasks via `delegate(task, agent_name, workspace_name, session=...)`. Helpers: `create_agent(config)`, `replace_agent(config)`, `create_workspace(config)`, `remove_workspace(name)`.
@@ -124,7 +127,15 @@ Thin business-logic layer sitting above the core. `WorkspaceService` and `AgentS
 `AgentService` also provides conversation lifecycle methods: `list_conversations(workspace, agent, session)` and `delete_conversation(workspace, agent, id, session)`. Both require a DB session and raise `NotFoundError` when the resource is absent.
 
 ### REST API
-FastAPI app in `api/`. Routers for `/workspaces` and `/agents` delegate to `WorkspaceService` / `AgentService`. Dependencies in `api/dependencies.py` inject the orchestrator and optional session factory from `app.state`. Exception handlers in `api/exception_handlers.py` convert service exceptions to appropriate HTTP status codes; a catch-all `Exception` handler returns `{"error": "internal_server_error"}` with 500 and logs the full traceback. Start with `uv run fastapi dev api/main.py`.
+FastAPI app in `api/`. Routers for `/workspaces`, `/agents`, and `/providers` delegate to `WorkspaceService` / `AgentService` / `ProviderRegistry`. Dependencies in `api/dependencies.py` inject the orchestrator, `ConversationService`, and optional session factory from `app.state`. Exception handlers in `api/exception_handlers.py` convert service exceptions to appropriate HTTP status codes; a catch-all `Exception` handler returns `{"error": "internal_server_error"}` with 500 and logs the full traceback. Start with `uv run fastapi dev api/main.py`.
+
+**Workspace chat** (`POST /workspaces/{name}/chat`) supports two routing modes controlled by the `WorkspaceChatRequest` body:
+- **Supervisor path** (default): omit `agent_name`; the supervisor LLM picks the best agent. Uses `conversation_id` to thread turns.
+- **Agent-direct path**: set `agent_name` to skip the supervisor. Optionally set `provider` and/or `model` to override the LLM for this turn only (ephemeral — not pooled). Returns `conversation_id` that can be passed back on subsequent turns.
+
+**Workspace streaming** (`POST /workspaces/{name}/chat/stream`) requires `agent_name` (supervisor streaming is not supported). Returns `text/event-stream` with `data: {token}\n\n` lines and a `data: [DONE]\n\n` sentinel. `X-Conversation-Id` and `X-Agent-Used` response headers carry the conversation metadata.
+
+**Provider discovery** (`GET /providers/`, `GET /providers/{name}/models`) lists registered providers and their available models.
 
 ### Persistence (optional)
 Async SQLAlchemy + asyncpg backed by PostgreSQL. `Conversation` and `Message` ORM models live in `persistence/models.py`. `ConversationRepository` handles all DB access. Set `DATABASE_URL` to enable; omit it to run in-memory only. Use Alembic for migrations.

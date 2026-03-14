@@ -390,9 +390,16 @@ class Agent:
                 await repo.save_message(self._conversation_id, "ai", ai_content)
                 await repo.touch_conversation(self._conversation_id)
 
-    def clone(self) -> Agent:
-        """Return a fresh Agent with the same config, LLM, and tools but empty history."""
-        return Agent.from_llm(self.config, self._llm, tools=list(self._tools))
+    def clone(self, *, llm: BaseChatModel | None = None) -> Agent:
+        """Return a fresh Agent with the same config, LLM, and tools but empty history.
+
+        Args:
+            llm: Optional LLM override. When provided the clone uses this LLM
+                 instead of the template's LLM, and is disconnected from any
+                 ProviderRegistry.
+        """
+        effective_llm = llm if llm is not None else self._llm
+        return Agent.from_llm(self.config, effective_llm, tools=list(self._tools))
 
     def reset(self) -> None:
         """Clear in-memory conversation history.

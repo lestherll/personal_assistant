@@ -45,4 +45,7 @@ class ResetRequest(BaseModel):
 
 class WorkspaceChatRequest(BaseModel):
     message: str = Field(examples=["Hello, how are you?"])
-    thread_id: str | None = None  # Omit to start a new conversation thread
+    conversation_id: str | None = None  # Omit to start a new conversation
+    agent_name: str | None = None  # Skip supervisor, target a specific agent
+    provider: str | None = None  # Override provider (requires agent_name)
+    model: str | None = None  # Override model (requires agent_name)

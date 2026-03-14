@@ -53,5 +53,17 @@ class ConversationView:
 @dataclass
 class WorkspaceChatView:
     response: str
-    thread_id: str
+    conversation_id: str
     agent_used: str
+
+
+@dataclass
+class ProviderView:
+    name: str
+    default_model: str
+
+
+@dataclass
+class ProviderModelsView:
+    name: str
+    models: list[str]

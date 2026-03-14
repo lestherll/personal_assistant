@@ -187,6 +187,64 @@ class TestGetOrCreateCloneNotFound:
 
 
 # ---------------------------------------------------------------------------
+# llm_override
+# ---------------------------------------------------------------------------
+
+
+class TestGetOrCreateCloneLlmOverride:
+    async def test_override_clone_uses_given_llm(self, service, workspace, template):
+        from unittest.mock import MagicMock
+
+        from langchain_core.language_models import BaseChatModel
+
+        override_llm = MagicMock(spec=BaseChatModel)
+        with _patch_create_agent():
+            clone, _ = await service.get_or_create_clone(
+                "ws", "Bot", None, session=None, llm_override=override_llm
+            )
+        assert clone._llm is override_llm
+
+    async def test_override_clone_not_added_to_pool(self, service, pool, workspace, template):
+        from unittest.mock import MagicMock
+
+        from langchain_core.language_models import BaseChatModel
+
+        override_llm = MagicMock(spec=BaseChatModel)
+        with _patch_create_agent():
+            _, conv_id = await service.get_or_create_clone(
+                "ws", "Bot", None, session=None, llm_override=override_llm
+            )
+        assert pool.get("ws", "Bot", conv_id) is None
+
+    async def test_override_template_not_mutated(self, service, workspace, template):
+        from unittest.mock import MagicMock
+
+        from langchain_core.language_models import BaseChatModel
+
+        original_llm = template._llm
+        override_llm = MagicMock(spec=BaseChatModel)
+        with _patch_create_agent():
+            await service.get_or_create_clone(
+                "ws", "Bot", None, session=None, llm_override=override_llm
+            )
+        assert template._llm is original_llm
+
+    async def test_override_uses_provided_conversation_id(self, service, workspace, template):
+        import uuid
+        from unittest.mock import MagicMock
+
+        from langchain_core.language_models import BaseChatModel
+
+        override_llm = MagicMock(spec=BaseChatModel)
+        cid = uuid.uuid4()
+        with _patch_create_agent():
+            _, returned_id = await service.get_or_create_clone(
+                "ws", "Bot", cid, session=None, llm_override=override_llm
+            )
+        assert returned_id == cid
+
+
+# ---------------------------------------------------------------------------
 # reset_conversation
 # ---------------------------------------------------------------------------
 

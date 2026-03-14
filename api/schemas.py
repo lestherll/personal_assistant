@@ -101,8 +101,18 @@ class ChatResponse(BaseModel):
 
 class WorkspaceChatResponse(BaseModel):
     response: str
-    thread_id: str
+    conversation_id: str
     agent_used: str
+
+
+class ProviderResponse(BaseModel):
+    name: str
+    default_model: str
+
+
+class ProviderModelsResponse(BaseModel):
+    name: str
+    models: list[str]
 
 
 class ErrorResponse(BaseModel):

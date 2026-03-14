@@ -75,16 +75,20 @@ def test_get_conversation_pool_returns_pool_from_app_state(mock_registry):
 
 def test_get_workspace_service_returns_workspace_service(mock_registry):
     orchestrator = Orchestrator(mock_registry)
+    pool = ConversationPool()
+    conv_service = ConversationService(orchestrator, pool)
 
-    service = get_workspace_service(orchestrator)
+    service = get_workspace_service(orchestrator, conv_service)
 
     assert isinstance(service, WorkspaceService)
 
 
 def test_get_workspace_service_wraps_given_orchestrator(mock_registry):
     orchestrator = Orchestrator(mock_registry)
+    pool = ConversationPool()
+    conv_service = ConversationService(orchestrator, pool)
 
-    service = get_workspace_service(orchestrator)
+    service = get_workspace_service(orchestrator, conv_service)
 
     assert service._orchestrator is orchestrator
 

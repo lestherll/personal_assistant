@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from api.exception_handlers import register_exception_handlers
-from api.routers import agents, workspaces
+from api.routers import agents, providers, workspaces
 from personal_assistant.bootstrap import build_registry
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.persistence.database import build_engine, build_session_factory
@@ -58,6 +58,7 @@ app = FastAPI(title="Personal Assistant API", version="0.1.0", lifespan=lifespan
 register_exception_handlers(app)
 app.include_router(workspaces.router)
 app.include_router(agents.router)
+app.include_router(providers.router)
 
 
 @app.get("/health")

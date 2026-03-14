@@ -50,19 +50,20 @@ Each tier depends only on the tier directly below it. The API never touches the 
 
 **`ProviderConfig`** — dataclass holding `name: str` and `default_model: str`. Subclassed by each concrete provider to add provider-specific fields (API key, temperature, base URL, etc.).
 
-**`AIProvider`** — ABC with a single abstract method:
+**`AIProvider`** — ABC with one abstract method and one async method:
 ```python
 def get_model(self, model: str | None = None, **kwargs) -> BaseChatModel
+async def list_models(self) -> list[str]   # default: [self.default_model]
 ```
-The `model` parameter falls back to `ProviderConfig.default_model` when `None`.
+The `model` parameter of `get_model` falls back to `ProviderConfig.default_model` when `None`. `list_models` has a default implementation that returns `[default_model]`; subclasses override it to expose the full model catalogue.
 
 **`ProviderRegistry`** — named dictionary of `AIProvider` instances with a default pointer. The first registered provider becomes the default unless overridden. `get(name=None)` falls back to the default automatically.
 
 **Concrete providers:**
-- `AnthropicProvider` — wraps `ChatAnthropic`; reads `ANTHROPIC_API_KEY` from env.
-- `OllamaProvider` — wraps `ChatOllama`; connects to local Ollama at `http://localhost:11434`.
+- `AnthropicProvider` — wraps `ChatAnthropic`; reads `ANTHROPIC_API_KEY` from env. `list_models()` returns a hardcoded list of known Claude model IDs.
+- `OllamaProvider` — wraps `ChatOllama`; connects to local Ollama at `http://localhost:11434`. `list_models()` queries `GET /api/tags` via `httpx` and falls back to `[default_model]` on any error.
 
-**Extension point:** subclass `AIProvider`, implement `get_model()`, register with `registry.register(MyProvider())` in the app bootstrap.
+**Extension point:** subclass `AIProvider`, implement `get_model()` (and optionally `list_models()`), register with `registry.register(MyProvider())` in the app bootstrap.
 
 ---
 
@@ -97,7 +98,7 @@ Default `_arun()` delegates to `_run()`. The generic `R` is the return type.
 
 - **Lazy graph rebuild:** `register_tool()` / `remove_tool()` set `_dirty = True`. The LangGraph compiled graph is rebuilt at the next `run()` / `stream()` call via `_ensure_graph()`. `batch_tools()` is a context manager that defers the rebuild until exit.
 - **Lazy history loading:** when `conversation_id` is set (resuming a conversation), history is NOT loaded from DB immediately. It is loaded on the first `run()` / `stream()` call with a valid session, gated by `_history_loaded`.
-- **Cloning:** `agent.clone()` produces a fresh agent with the same config and tools but empty history. Used by `ConversationService` to give each conversation its own isolated agent instance.
+- **Cloning:** `agent.clone(*, llm=None)` produces a fresh agent with the same config and tools but empty history. The optional `llm` kwarg substitutes a different LLM in the clone without modifying the template. Used by `ConversationService` to give each conversation its own isolated agent instance, and to create ephemeral per-turn clones when a model override is requested.
 - **Factory classmethods:**
   - `Agent.from_config(config, registry)` — resolves provider + model from registry (normal path).
   - `Agent.from_llm(config, llm)` — bypasses registry; useful for testing with mock LLMs.
@@ -159,21 +160,25 @@ Central coordinator. Owns the `ProviderRegistry` and all `Workspace` instances.
 - Conversation lifecycle: list conversations, delete a conversation (both require a DB session).
 - `update_agent()` rebuilds the agent from a merged config (conversation history is lost — see [Design Decisions](#key-design-decisions)).
 
-**`WorkspaceService`** — stateless wrapper for workspace operations:
+**`WorkspaceService`** — stateless wrapper for workspace operations. Requires a `ConversationService` for the agent-direct chat paths.
 - CRUD: create, list, get, update, delete workspaces.
-- Workspace-level chat: delegates to the workspace supervisor, returns `(response, thread_id, agent_used)`.
+- `chat(workspace_name, message, conversation_id, agent_name, provider, model, session)` — two routing modes:
+  - **Supervisor path** (`agent_name=None`): delegates to `WorkspaceSupervisor`, returns `WorkspaceChatView(response, conversation_id, agent_used)`.
+  - **Agent-direct path** (`agent_name` set): resolves an LLM override from the registry if `provider`/`model` are given, then delegates to `ConversationService.get_or_create_clone()`. Raises `ServiceValidationError` if `provider`/`model` are set without `agent_name`, or if `conversation_id` is not a valid UUID.
+- `stream_chat(...)` — agent-direct path only; returns `(AsyncIterator[str], conversation_id_str, agent_name)`. Raises `ServiceValidationError` if `agent_name` is absent (supervisor streaming is a future enhancement).
 - `update_workspace()` mutates the config in-place (safe because no structural rebuild is needed).
 
 **`ConversationPool`** — application-scoped LRU cache of per-conversation agent clones, keyed by `(workspace_name, agent_name, conversation_id)`. Evicts the least-recently-used entry when the pool is full. Supports TTL-based bulk expiry. Never touches the DB — purely in-memory.
 
-**`ConversationService`** — manages the clone lifecycle for individual conversations:
-- **Pool hit:** returns the existing clone immediately.
+**`ConversationService`** — manages the clone lifecycle for individual conversations via `get_or_create_clone(workspace, agent, conversation_id, session, *, llm_override=None)`:
+- **Pool hit:** returns the existing clone immediately (skipped when `llm_override` is set).
 - **New conversation:** clones the template agent, optionally persists a new `Conversation` row, stores the clone in the pool.
 - **Cold-start** (known `conversation_id`, pool miss): validates the conversation exists in the DB, then clones the template and binds the `conversation_id` for lazy history reload.
+- **LLM override path:** when `llm_override` is set, creates an ephemeral clone with the given LLM, still creates a DB row if a session is available, but does **not** store the clone in the pool. This makes model-overridden requests stateless per-turn.
 
 **Request DTOs** — Pydantic v2 request models for create/update/chat operations.
 
-**View dataclasses** — frozen response projections (`AgentView`, `WorkspaceView`, `WorkspaceDetailView`, `WorkspaceChatView`, `ConversationView`). No logic — pure data for serialisation.
+**View dataclasses** — frozen response projections (`AgentView`, `WorkspaceView`, `WorkspaceDetailView`, `WorkspaceChatView`, `ConversationView`, `ProviderView`, `ProviderModelsView`). No logic — pure data for serialisation.
 
 **Typed domain exceptions:**
 
@@ -196,12 +201,14 @@ Central coordinator. Owns the `ProviderRegistry` and all `Workspace` instances.
 
 **Dependency injection** — request-scoped:
 - Orchestrator — retrieved from application state (no allocation per request).
-- `WorkspaceService` / `AgentService` — constructed fresh per request (stateless wrappers).
+- `ProviderRegistry` — retrieved from the orchestrator on application state.
+- `WorkspaceService` / `AgentService` — constructed fresh per request (stateless wrappers). `WorkspaceService` is injected with a `ConversationService` to support agent-direct chat.
 - `AsyncSession | None` — yielded from the session factory if one is configured; `None` otherwise (graceful no-DB degradation).
 
 **Routers:**
-- `/workspaces` — workspace CRUD + workspace-level chat (supervisor-routed).
+- `/workspaces` — workspace CRUD + workspace-level chat (supervisor or agent-direct) + streaming.
 - `/workspaces/{workspace_name}/agents` — agent CRUD + per-agent chat (non-streaming and SSE streaming) + reset.
+- `/providers` — provider discovery: list providers, list models for a provider.
 
 **Exception handlers** — map service exceptions to HTTP responses with a structured `ErrorResponse(error, detail)` body. A catch-all `Exception` handler returns `{"error": "internal_server_error"}` with 500 and logs the traceback server-side, preventing stack traces from leaking to clients.
 
@@ -238,8 +245,8 @@ The workspace is the unit of tool coordination. When a tool is added to a worksp
 ### Supervisor-based workspace routing
 Rather than requiring callers to name a specific agent for workspace-level chat, the workspace owns a `WorkspaceSupervisor` that uses a separate LLM call to route each turn to the most suitable agent based on agent descriptions and conversation history. This decouples routing policy from the caller. The supervisor is rebuilt automatically whenever the agent roster changes.
 
-### Conversation threading via `thread_id`
-The supervisor's LangGraph `MemorySaver` checkpointer stores conversation state keyed by `thread_id`. Callers receive the `thread_id` in every response and pass it back on subsequent turns. A new UUID is generated for new conversations. This makes conversation continuity explicit and stateless from the API caller's perspective — the server holds the state, the client holds the key.
+### Conversation threading via `conversation_id`
+All workspace chat endpoints expose a single `conversation_id: str` field. For the supervisor path this maps to the LangGraph `MemorySaver` checkpointer's internal `thread_id` string; for the agent-direct path it maps to the `uuid.UUID` used by `ConversationPool` and the persistence layer (converted at service boundary). Callers receive `conversation_id` in every response and pass it back on subsequent turns. A new identifier is generated for new conversations. This makes conversation continuity explicit and stateless from the API caller's perspective — the server holds the state, the client holds the key.
 
 ### Per-conversation agent clones via `ConversationPool`
 For direct (non-supervisor) agent chat, each conversation gets its own agent clone rather than sharing a single agent instance. The pool manages clone lifecycle with LRU eviction and TTL expiry. This isolates conversation history between concurrent users while keeping memory bounded.
@@ -333,18 +340,18 @@ POST /workspaces/{workspace_name}/agents/{agent_name}/chat/stream
                  └─ yield  "data: [DONE]\n\n"
 ```
 
-### 4. Workspace-Level Chat (Supervisor Routing)
+### 4. Workspace-Level Chat — Supervisor Path
 
 ```
 POST /workspaces/{workspace_name}/chat
-  { "message": "Help me with my CV", "thread_id": null }
+  { "message": "Help me with my CV", "conversation_id": null }
   │
   ├─ Pydantic validates body → WorkspaceChatRequest
-  ├─ DI: WorkspaceService(orchestrator)
+  ├─ DI: WorkspaceService(orchestrator, conversation_service)
   │
-  └─ WorkspaceService.chat(workspace_name, message, thread_id, session)
+  └─ WorkspaceService.chat(workspace_name, message, conversation_id=None, agent_name=None, ...)
        ├─ validate workspace exists  (NotFoundError on miss)
-       └─ workspace.delegate(message, thread_id)
+       └─ orchestrator.delegate_to_workspace(message, workspace_name, thread_id=None)
             └─ WorkspaceSupervisor.run(message, thread_id)
                  ├─ generate new thread_id if none provided
                  ├─ graph.ainvoke({"messages": [HumanMessage]}, config={"thread_id": ...})
@@ -357,7 +364,26 @@ POST /workspaces/{workspace_name}/chat
                  │    └─ supervisor node sees AIMessage → Command(goto=END)
                  └─ return (response_text, thread_id, agent_used)
   │
-  └─ WorkspaceChatResponse(response=..., thread_id=..., agent_used=...)
+  └─ WorkspaceChatResponse(response=..., conversation_id=..., agent_used=...)
+```
+
+### 5. Workspace-Level Chat — Agent-Direct Path (with optional model override)
+
+```
+POST /workspaces/{workspace_name}/chat
+  { "message": "Hello", "agent_name": "Assistant",
+    "provider": "anthropic", "model": "claude-haiku-4-5-20251001" }   ← optional override
+  │
+  └─ WorkspaceService.chat(..., agent_name="Assistant", provider="anthropic", model="...")
+       ├─ validate provider/model not set without agent_name  (ServiceValidationError)
+       ├─ validate workspace exists
+       ├─ resolve override_llm from registry if provider/model set
+       └─ ConversationService.get_or_create_clone(ws, agent, conv_uuid, session, llm_override=...)
+            ├─ llm_override set → ephemeral clone (not pooled), create DB row if session
+            └─ return (clone, conversation_id)
+       └─ clone.run(message, session)
+  │
+  └─ WorkspaceChatResponse(response=..., conversation_id=..., agent_used="Assistant")
 ```
 
 ---
@@ -367,12 +393,15 @@ POST /workspaces/{workspace_name}/chat
 | Method | Path | Description | Status |
 |---|---|---|---|
 | `GET` | `/health` | Health check | 200 |
+| `GET` | `/providers/` | List all registered providers | 200 |
+| `GET` | `/providers/{name}/models` | List available models for a provider | 200 |
 | `POST` | `/workspaces` | Create a workspace | 201 |
 | `GET` | `/workspaces` | List all workspaces | 200 |
 | `GET` | `/workspaces/{workspace_name}` | Get workspace details | 200 |
 | `PATCH` | `/workspaces/{workspace_name}` | Update workspace metadata | 200 |
 | `DELETE` | `/workspaces/{workspace_name}` | Delete a workspace | 204 |
-| `POST` | `/workspaces/{workspace_name}/chat` | Workspace-level chat (supervisor-routed) | 200 |
+| `POST` | `/workspaces/{workspace_name}/chat` | Workspace chat — supervisor or agent-direct (supports `agent_name`, `provider`, `model`, `conversation_id`) | 200 |
+| `POST` | `/workspaces/{workspace_name}/chat/stream` | Streaming workspace chat — agent-direct only (SSE, requires `agent_name`) | 200 |
 | `POST` | `/workspaces/{workspace_name}/agents` | Create an agent | 201 |
 | `GET` | `/workspaces/{workspace_name}/agents` | List agents in workspace | 200 |
 | `GET` | `/workspaces/{workspace_name}/agents/{agent_name}` | Get agent details | 200 |
@@ -404,6 +433,9 @@ POST /workspaces/{workspace_name}/chat
 
        def get_model(self, model: str | None = None, **kwargs) -> BaseChatModel:
            return MyLangChainModel(model=model or self.config.default_model, **kwargs)
+
+       async def list_models(self) -> list[str]:   # optional override
+           return ["my-model", "my-model-large"]
    ```
 2. Register in the app bootstrap:
    ```python

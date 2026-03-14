@@ -3,18 +3,21 @@
 [![Tests](https://github.com/lestherll/personal_assistant/actions/workflows/tests.yml/badge.svg)](https://github.com/lestherll/personal_assistant/actions/workflows/tests.yml)
 [![Security](https://github.com/lestherll/personal_assistant/actions/workflows/security.yml/badge.svg)](https://github.com/lestherll/personal_assistant/actions/workflows/security.yml)
 
-A modular AI personal assistant built on [LangChain](https://www.langchain.com/) and [LangGraph](https://www.langchain.com/langgraph). The core idea is configurable AI agents that specialise in specific tasks, grouped into workspaces, backed by a pluggable provider registry — making it easy to swap models, extend with new tools, and expose as an API.
+A modular AI personal assistant built on [LangChain](https://www.langchain.com/) and [LangGraph](https://www.langchain.com/langgraph). Configurable agents specialise in specific tasks, are grouped into workspaces, and are backed by a pluggable provider registry — making it easy to swap models, extend with new tools, and expose everything over an HTTP API.
 
 ---
 
 ## Features
 
-- **Provider registry** — plug in any LLM backend (Anthropic, Ollama, and more to come) and switch between them per-agent
+- **Multiple AI providers** — Anthropic (Claude) and Ollama (local models) out of the box; discover available models at runtime via `/providers`
 - **Configurable agents** — each agent has its own system prompt, provider, model, and tool allowlist
-- **Persistent conversation history** — agents remember context across turns within a session
-- **Workspaces** — group agents and tools together; tools auto-register with compatible agents
-- **Runtime agent switching** — hot-swap an agent's model, prompt, or provider without restarting
-- **Extensible tools** — add new tools by subclassing `AssistantTool`
+- **Workspaces** — group agents and tools together; the workspace supervisor automatically routes each message to the best agent
+- **Flexible workspace chat** — target the supervisor for automatic routing, or name a specific agent to skip it; override the provider and model per request without changing the agent's configuration
+- **Streaming responses** — SSE streaming for both per-agent and workspace-level chat
+- **Persistent conversation history** — agents remember context across turns; resumable via `conversation_id`
+- **Optional PostgreSQL persistence** — conversation and message history backed by SQLAlchemy + asyncpg; fully in-memory without a database configured
+- **REST API** — FastAPI with full OpenAPI docs, typed request/response schemas, and structured error responses
+- **Extensible tools** — add new tools by subclassing `AssistantTool`; tools auto-register with all compatible agents in a workspace
 
 ---
 
@@ -37,45 +40,128 @@ uv sync
 
 # Set up environment
 cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY
+# Edit .env — add ANTHROPIC_API_KEY and/or leave blank to use Ollama only
 
-# Run the REPL
+# Start the REST API
+uv run fastapi dev api/main.py
+
+# Or start the interactive REPL
 uv run python main.py
 ```
 
 ---
 
-## Project Structure
+## API Usage
 
+### Discover providers and models
+
+```bash
+curl http://localhost:8000/providers/
+curl http://localhost:8000/providers/anthropic/models
+curl http://localhost:8000/providers/ollama/models
 ```
-personal_assistant/
-├── core/
-│   ├── agent.py          # Agent + AgentConfig (LangGraph ReAct loop, history)
-│   ├── tool.py           # AssistantTool base class
-│   ├── workspace.py      # Workspace — groups agents and tools
-│   └── orchestrator.py   # Orchestrator — manages workspaces and routes tasks
-├── providers/
-│   ├── base.py           # AIProvider + ProviderConfig abstract base
-│   ├── registry.py       # ProviderRegistry — named lookup with default
-│   ├── anthropic.py      # AnthropicProvider (Claude via langchain-anthropic)
-│   └── ollama.py         # OllamaProvider (local models via langchain-ollama)
-├── agents/
-│   └── assistant_agent.py  # General-purpose starter agent
-├── tools/
-│   └── example_tool.py     # EchoTool — template for building new tools
-└── workspaces/
-    └── default_workspace.py  # Default workspace factory
-main.py                       # Entry point — REPL
+
+### Workspace chat — automatic agent routing
+
+The supervisor reads each agent's description and routes the message to the most suitable one.
+
+```bash
+curl -X POST http://localhost:8000/workspaces/default/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Help me write a cover letter."}'
+```
+
+```json
+{
+  "response": "...",
+  "conversation_id": "a3f1c2d4-...",
+  "agent_used": "Career"
+}
+```
+
+Pass `conversation_id` back on subsequent turns to continue the conversation.
+
+### Workspace chat — target a specific agent
+
+Skip the supervisor and route directly to a named agent.
+
+```bash
+curl -X POST http://localhost:8000/workspaces/default/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Review this Python function.", "agent_name": "Coding"}'
+```
+
+### Override the model for a single request
+
+Use a different provider or model for one turn without changing the agent's saved configuration.
+
+```bash
+curl -X POST http://localhost:8000/workspaces/default/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": "Summarise this article.",
+    "agent_name": "Research",
+    "provider": "anthropic",
+    "model": "claude-haiku-4-5-20251001"
+  }'
+```
+
+### Streaming workspace chat
+
+```bash
+curl -N -X POST http://localhost:8000/workspaces/default/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Tell me a joke.", "agent_name": "Assistant"}'
+```
+
+Response headers carry `X-Conversation-Id` and `X-Agent-Used`. The body is a standard SSE stream (`data: {token}\n\n`) terminated by `data: [DONE]\n\n`.
+
+### Per-agent chat
+
+Target an agent directly without going through the workspace.
+
+```bash
+# Non-streaming
+curl -X POST http://localhost:8000/workspaces/default/agents/Assistant/chat \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello"}'
+
+# Streaming
+curl -N -X POST http://localhost:8000/workspaces/default/agents/Assistant/chat/stream \
+  -H "Content-Type: application/json" \
+  -d '{"message": "Hello"}'
+```
+
+### Create a workspace and agent via the API
+
+```bash
+# Create a workspace
+curl -X POST http://localhost:8000/workspaces/ \
+  -H "Content-Type: application/json" \
+  -d '{"name": "research", "description": "Research workspace"}'
+
+# Create an agent in it
+curl -X POST http://localhost:8000/workspaces/research/agents \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Analyst",
+    "description": "Data and market analyst",
+    "system_prompt": "You are a data analyst. Be precise and cite evidence.",
+    "provider": "anthropic",
+    "model": "claude-sonnet-4-6"
+  }'
 ```
 
 ---
 
-## Configuration
+## Environment
 
-Create a `.env` file in the project root:
+Copy `.env.example` to `.env` and configure:
 
 ```env
-ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=sk-ant-...           # Claude models
+RAPIDAPI_KEY=...                       # optional — enables job search tool
+DATABASE_URL=postgresql+asyncpg://...  # optional — enables conversation persistence
 ```
 
 Ollama runs locally at `http://localhost:11434` by default. Pull a model before using it:
@@ -86,104 +172,22 @@ ollama pull llama3.2
 
 ---
 
-## Usage
-
-### Basic REPL
-
-```bash
-uv run python main.py
-```
-
-### Switching providers
-
-```python
-from personal_assistant.providers import (
-    ProviderRegistry, AnthropicProvider, OllamaProvider, OllamaConfig
-)
-
-registry = ProviderRegistry()
-registry.register(AnthropicProvider(), default=True)
-registry.register(OllamaProvider(OllamaConfig(default_model="llama3.2")))
-```
-
-### Creating a custom agent
-
-```python
-from personal_assistant.core.agent import AgentConfig
-from personal_assistant.core.orchestrator import Orchestrator
-
-orchestrator = Orchestrator(registry)
-workspace = orchestrator.create_workspace(WorkspaceConfig(name="research", description="..."))
-
-orchestrator.create_agent(AgentConfig(
-    name="Researcher",
-    description="In-depth research assistant",
-    system_prompt="You are a research assistant. Be thorough and cite your reasoning.",
-    provider="ollama",
-    model="llama3.2",
-))
-
-response = orchestrator.delegate("Explain transformer attention mechanisms", agent_name="Researcher")
-```
-
-### Hot-swapping an agent at runtime
-
-```python
-orchestrator.replace_agent(AgentConfig(
-    name="Assistant",
-    description="Terse assistant",
-    system_prompt="You are a terse assistant. One sentence max.",
-    provider="anthropic",
-    model="claude-opus-4-6",
-))
-```
-
-### Adding a custom tool
-
-```python
-from pydantic import BaseModel, Field
-from personal_assistant.core.tool import AssistantTool
-
-class WeatherInput(BaseModel):
-    location: str = Field(description="City name to get weather for.")
-
-class WeatherTool(AssistantTool):
-    name: str = "get_weather"
-    description: str = "Get the current weather for a location."
-    args_schema: type[BaseModel] = WeatherInput
-
-    def _run(self, location: str) -> str:
-        return f"It's sunny and 22°C in {location}."
-
-workspace.add_tool(WeatherTool())  # auto-registers with all agents in the workspace
-```
-
----
-
 ## Development
 
 ```bash
-# Install dev dependencies
-uv sync
-
-# Run tests
-uv run pytest
-
-# Lint
-uv run ruff check .
-
-# Format
-uv run ruff format .
-
-# Type check
-uv run mypy personal_assistant
+uv run pytest              # unit + functional tests
+uv run ruff check .        # lint
+uv run ruff format .       # format
+uv run mypy . --exclude tests  # type check
 ```
+
+See [CLAUDE.md](CLAUDE.md) for the full developer guide and [ARCHITECTURE.md](ARCHITECTURE.md) for the system design.
 
 ---
 
 ## Roadmap
 
-- [ ] FastAPI layer — expose as an HTTP API with session management and SSE streaming
 - [ ] More providers — OpenAI, Groq, Google Gemini
-- [ ] Persistent sessions — save and restore conversation history
 - [ ] Web UI
+- [ ] Multi-turn model override support (pool keyed by model)
+- [ ] Supervisor streaming (LangGraph graph-level)
