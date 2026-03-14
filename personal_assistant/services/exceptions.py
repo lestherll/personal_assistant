@@ -22,3 +22,6 @@ class AlreadyExistsError(ServiceError):
 
 class ServiceValidationError(ServiceError):
     """Raised when input data fails domain validation."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)

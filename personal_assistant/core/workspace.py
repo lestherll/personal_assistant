@@ -52,13 +52,21 @@ class Workspace:
         self._rebuild_supervisor()
 
     def _register_agent(self, agent: Agent) -> None:
-        """Register an agent and propagate workspace tools without rebuilding the supervisor."""
+        """Register an agent and propagate workspace tools without rebuilding the supervisor.
+
+        Raises:
+            ValueError: If an agent with the same name already exists.
+        """
+        if agent.config.name in self._agents:
+            raise ValueError(f"Agent '{agent.config.name}' already exists in workspace")
         for tool in self._tools.values():
             agent.register_tool(tool)
         self._agents[agent.config.name] = agent
 
     def remove_agent(self, name: str) -> None:
-        self._agents.pop(name, None)
+        if name not in self._agents:
+            raise KeyError(f"No agent named '{name}' in workspace")
+        del self._agents[name]
         self._rebuild_supervisor()
 
     def replace_agent(self, agent: Agent) -> None:
@@ -101,8 +109,14 @@ class Workspace:
             agent.register_tool(tool)
 
     def remove_tool(self, name: str) -> None:
-        """Remove a tool from the workspace and from all agents."""
-        self._tools.pop(name, None)
+        """Remove a tool from the workspace and from all agents.
+
+        Raises:
+            KeyError: If no tool with the given name exists in the workspace.
+        """
+        if name not in self._tools:
+            raise KeyError(f"No tool named '{name}' in workspace")
+        del self._tools[name]
         for agent in self._agents.values():
             agent.remove_tool(name)
 

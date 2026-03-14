@@ -45,3 +45,11 @@ class TestCreateDefaultWorkspace:
         with patch("personal_assistant.core.agent.create_agent", return_value=make_mock_graph()):
             ws = create_default_workspace(orchestrator)
         assert "agent_info" in ws.list_tools()
+
+    def test_career_agent_has_indeed_tool(self, orchestrator):
+        with patch("personal_assistant.core.agent.create_agent", return_value=make_mock_graph()):
+            ws = create_default_workspace(orchestrator)
+        career_agent = ws.get_agent("CareerAgent")
+        assert career_agent is not None
+        # indeed_job_search is a private tool on CareerAgent, not in workspace tools
+        assert "indeed_job_search" not in ws.list_tools()

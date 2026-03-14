@@ -119,6 +119,10 @@ Bidirectional propagation rules:
 - Agent added to workspace → automatically receives all existing workspace tools.
 - Agent-private tools can be registered to a single agent without entering the shared workspace tool registry and without propagating to other agents.
 
+Mutation rules:
+- `add_agent` raises `ValueError` on name collision — use `replace_agent` to swap.
+- `remove_agent` and `remove_tool` raise `KeyError` if the name is not present.
+
 Whenever the agent roster changes (add, remove, replace) the workspace rebuilds its supervisor automatically.
 
 #### `WorkspaceSupervisor`
@@ -152,6 +156,7 @@ Central coordinator. Owns the `ProviderRegistry` and all `Workspace` instances.
 **`AgentService`** — stateless wrapper around the orchestrator for agent operations:
 - CRUD: create, list, get, update, delete agents.
 - Chat: run (non-streaming), stream (SSE), reset conversation history.
+- Conversation lifecycle: list conversations, delete a conversation (both require a DB session).
 - `update_agent()` rebuilds the agent from a merged config (conversation history is lost — see [Design Decisions](#key-design-decisions)).
 
 **`WorkspaceService`** — stateless wrapper for workspace operations:
@@ -168,7 +173,7 @@ Central coordinator. Owns the `ProviderRegistry` and all `Workspace` instances.
 
 **Request DTOs** — Pydantic v2 request models for create/update/chat operations.
 
-**View dataclasses** — frozen response projections (`AgentView`, `WorkspaceView`, `WorkspaceDetailView`, `WorkspaceChatView`). No logic — pure data for serialisation.
+**View dataclasses** — frozen response projections (`AgentView`, `WorkspaceView`, `WorkspaceDetailView`, `WorkspaceChatView`, `ConversationView`). No logic — pure data for serialisation.
 
 **Typed domain exceptions:**
 
@@ -183,7 +188,7 @@ Central coordinator. Owns the `ProviderRegistry` and all `Workspace` instances.
 ### API
 
 **Bootstrap (lifespan):**
-1. Build the provider registry, register `AnthropicProvider` and `OllamaProvider`.
+1. Call `build_registry()` (from `personal_assistant/bootstrap.py`) to create the provider registry with `AnthropicProvider` and `OllamaProvider` (default).
 2. Create the orchestrator, store on application state.
 3. Call the workspace factory, add the default workspace to the orchestrator.
 4. If `DATABASE_URL` is set: build the async engine + session factory, store on application state.
@@ -198,7 +203,7 @@ Central coordinator. Owns the `ProviderRegistry` and all `Workspace` instances.
 - `/workspaces` — workspace CRUD + workspace-level chat (supervisor-routed).
 - `/workspaces/{workspace_name}/agents` — agent CRUD + per-agent chat (non-streaming and SSE streaming) + reset.
 
-**Exception handlers** — map service exceptions to HTTP responses with a structured `ErrorResponse(error, detail)` body.
+**Exception handlers** — map service exceptions to HTTP responses with a structured `ErrorResponse(error, detail)` body. A catch-all `Exception` handler returns `{"error": "internal_server_error"}` with 500 and logs the traceback server-side, preventing stack traces from leaking to clients.
 
 **Response DTOs** — Pydantic models with `from_view()` factory methods that consume service-layer view dataclasses. Separate from service schemas to keep serialisation and OpenAPI docs out of the service layer.
 
@@ -375,7 +380,9 @@ POST /workspaces/{workspace_name}/chat
 | `DELETE` | `/workspaces/{workspace_name}/agents/{agent_name}` | Delete an agent | 204 |
 | `POST` | `/workspaces/{workspace_name}/agents/{agent_name}/chat` | Non-streaming agent chat | 200 |
 | `POST` | `/workspaces/{workspace_name}/agents/{agent_name}/chat/stream` | Streaming agent chat (SSE) | 200 |
-| `POST` | `/workspaces/{workspace_name}/agents/{agent_name}/reset` | Reset conversation history | 200 |
+| `POST` | `/workspaces/{workspace_name}/agents/{agent_name}/reset` | Reset conversation history | 204 |
+| `GET` | `/workspaces/{workspace_name}/agents/{agent_name}/conversations` | List conversations (requires DB) | 200 |
+| `DELETE` | `/workspaces/{workspace_name}/agents/{agent_name}/conversations/{id}` | Delete a conversation (requires DB) | 204 |
 
 ---
 

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
@@ -9,6 +11,8 @@ from personal_assistant.services.exceptions import (
     NotFoundError,
     ServiceValidationError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -28,3 +32,9 @@ def register_exception_handlers(app: FastAPI) -> None:
     ) -> JSONResponse:
         body = ErrorResponse(error="validation_error", detail=str(exc))
         return JSONResponse(status_code=422, content=body.model_dump())
+
+    @app.exception_handler(Exception)
+    async def handle_unexpected(request: Request, exc: Exception) -> JSONResponse:
+        logger.exception("Unhandled exception for %s %s", request.method, request.url)
+        body = ErrorResponse(error="internal_server_error")
+        return JSONResponse(status_code=500, content=body.model_dump())

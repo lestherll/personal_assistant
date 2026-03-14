@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import dataclasses
 import uuid
+from datetime import datetime
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
 from personal_assistant.services.views import (
     AgentView,
+    ConversationView,
     WorkspaceDetailView,
     WorkspaceView,
 )
@@ -71,6 +73,24 @@ class WorkspaceDetailResponse(BaseModel):
             metadata=view.metadata,
             agents=[AgentResponse.from_view(a) for a in view.agents],
             tools=view.tools,
+        )
+
+
+class ConversationResponse(BaseModel):
+    id: uuid.UUID
+    agent_name: str
+    workspace_name: str | None
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_view(cls, view: ConversationView) -> ConversationResponse:
+        return cls(
+            id=view.id,
+            agent_name=view.agent_name,
+            workspace_name=view.workspace_name,
+            created_at=view.created_at,
+            updated_at=view.updated_at,
         )
 
 

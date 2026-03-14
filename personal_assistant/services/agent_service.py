@@ -9,7 +9,7 @@ from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.core.workspace import Workspace
 from personal_assistant.services.conversation_service import ConversationService
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
-from personal_assistant.services.views import AgentConfigView, AgentView
+from personal_assistant.services.views import AgentConfigView, AgentView, ConversationView
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -141,6 +141,54 @@ class AgentService:
                 yield content if isinstance(content, str) else str(content)
 
         return _generate(), conv_id
+
+    async def list_conversations(
+        self,
+        workspace_name: str,
+        agent_name: str,
+        session: AsyncSession,
+    ) -> list[ConversationView]:
+        """List all conversations for an agent (requires DB session)."""
+        self._get_workspace_or_raise(workspace_name)
+        ws = self._orchestrator.get_workspace(workspace_name)
+        assert ws is not None
+        self._get_agent_or_raise(ws, agent_name)
+
+        from personal_assistant.persistence.repository import ConversationRepository
+
+        repo = ConversationRepository(session)
+        convs = await repo.list_conversations(agent_name, workspace_name)
+        return [
+            ConversationView(
+                id=c.id,
+                agent_name=c.agent_name,
+                workspace_name=c.workspace_name,
+                created_at=c.created_at,
+                updated_at=c.updated_at,
+            )
+            for c in convs
+        ]
+
+    async def delete_conversation(
+        self,
+        workspace_name: str,
+        agent_name: str,
+        conversation_id: uuid.UUID,
+        session: AsyncSession,
+    ) -> None:
+        """Delete a conversation record and evict its clone from the pool."""
+        self._get_workspace_or_raise(workspace_name)
+        ws = self._orchestrator.get_workspace(workspace_name)
+        assert ws is not None
+        self._get_agent_or_raise(ws, agent_name)
+
+        from personal_assistant.persistence.repository import ConversationRepository
+
+        repo = ConversationRepository(session)
+        deleted = await repo.delete_conversation(conversation_id)
+        if not deleted:
+            raise NotFoundError("conversation", str(conversation_id))
+        self._conversation_service.reset_conversation(workspace_name, agent_name, conversation_id)
 
     def reset_agent(
         self,

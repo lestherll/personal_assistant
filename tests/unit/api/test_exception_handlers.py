@@ -38,6 +38,10 @@ def exc_app() -> FastAPI:
     async def raise_validation_error() -> None:
         raise ServiceValidationError("bad input")
 
+    @app.get("/raise/unexpected")
+    async def raise_unexpected() -> None:
+        raise RuntimeError("boom")
+
     return app
 
 
@@ -135,3 +139,36 @@ async def test_validation_error_detail_contains_message(exc_app: FastAPI) -> Non
         response = await client.get("/raise/validation-error")
 
     assert "bad input" in response.json()["detail"]
+
+
+# ---------------------------------------------------------------------------
+# Generic Exception → 500
+# ---------------------------------------------------------------------------
+
+
+def test_unexpected_error_status_code(exc_app: FastAPI) -> None:
+    # Use starlette TestClient with raise_server_exceptions=False so that the
+    # Exception handler can produce a 500 response rather than propagating.
+    from starlette.testclient import TestClient
+
+    client = TestClient(exc_app, raise_server_exceptions=False)
+    response = client.get("/raise/unexpected")
+    assert response.status_code == 500
+
+
+def test_unexpected_error_field(exc_app: FastAPI) -> None:
+    from starlette.testclient import TestClient
+
+    client = TestClient(exc_app, raise_server_exceptions=False)
+    response = client.get("/raise/unexpected")
+    assert response.json()["error"] == "internal_server_error"
+
+
+# ---------------------------------------------------------------------------
+# ServiceValidationError — constructible with message
+# ---------------------------------------------------------------------------
+
+
+def test_service_validation_error_message() -> None:
+    exc = ServiceValidationError("something went wrong")
+    assert str(exc) == "something went wrong"

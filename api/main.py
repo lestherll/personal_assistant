@@ -9,14 +9,9 @@ from fastapi import FastAPI
 
 from api.exception_handlers import register_exception_handlers
 from api.routers import agents, workspaces
+from personal_assistant.bootstrap import build_registry
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.persistence.database import build_engine, build_session_factory
-from personal_assistant.providers import (
-    AnthropicProvider,
-    OllamaConfig,
-    OllamaProvider,
-    ProviderRegistry,
-)
 from personal_assistant.services.conversation_pool import ConversationPool
 from personal_assistant.workspaces.default_workspace import create_default_workspace
 
@@ -24,9 +19,7 @@ from personal_assistant.workspaces.default_workspace import create_default_works
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # --- Provider registry ---
-    registry = ProviderRegistry()
-    registry.register(AnthropicProvider())
-    registry.register(OllamaProvider(OllamaConfig(default_model="qwen2.5:14b")), default=True)
+    registry = build_registry()
 
     # --- Orchestrator + default workspace ---
     orchestrator = Orchestrator(registry)

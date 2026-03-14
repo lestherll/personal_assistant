@@ -1,4 +1,6 @@
-from unittest.mock import patch
+import uuid
+from datetime import UTC, datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -7,7 +9,7 @@ from personal_assistant.services.agent_service import AgentService
 from personal_assistant.services.conversation_pool import ConversationPool
 from personal_assistant.services.conversation_service import ConversationService
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
-from personal_assistant.services.views import AgentView
+from personal_assistant.services.views import AgentView, ConversationView
 from tests.unit.conftest import make_mock_graph, make_mock_provider
 
 
@@ -236,3 +238,85 @@ class TestResetAgent:
     def test_unknown_agent_raises(self, service, workspace):
         with pytest.raises(NotFoundError):
             service.reset_agent("ws", "ghost")
+
+
+def _make_mock_conversation(conv_id: uuid.UUID | None = None) -> MagicMock:
+    conv = MagicMock()
+    conv.id = conv_id or uuid.uuid4()
+    conv.agent_name = "Bot"
+    conv.workspace_name = "ws"
+    conv.created_at = datetime.now(UTC)
+    conv.updated_at = datetime.now(UTC)
+    return conv
+
+
+class TestListConversations:
+    async def test_returns_conversation_views(self, service, workspace) -> None:
+        _create_agent(service)
+        conv_id = uuid.uuid4()
+        mock_session = MagicMock()
+        mock_repo = MagicMock()
+        mock_repo.list_conversations = AsyncMock(return_value=[_make_mock_conversation(conv_id)])
+
+        with patch(
+            "personal_assistant.persistence.repository.ConversationRepository",
+            return_value=mock_repo,
+        ):
+            views = await service.list_conversations("ws", "Bot", mock_session)
+
+        assert len(views) == 1
+        assert isinstance(views[0], ConversationView)
+        assert views[0].id == conv_id
+
+    async def test_unknown_workspace_raises(self, service) -> None:
+        with pytest.raises(NotFoundError):
+            await service.list_conversations("ghost", "Bot", MagicMock())
+
+    async def test_unknown_agent_raises(self, service, workspace) -> None:
+        with pytest.raises(NotFoundError):
+            await service.list_conversations("ws", "ghost", MagicMock())
+
+
+class TestDeleteConversation:
+    async def test_deletes_and_evicts(self, service, workspace) -> None:
+        _create_agent(service)
+        conv_id = uuid.uuid4()
+        mock_session = MagicMock()
+        mock_repo = MagicMock()
+        mock_repo.delete_conversation = AsyncMock(return_value=True)
+
+        patcher, _ = _make_graph_patcher()
+        with patcher:
+            await service.run_agent("ws", "Bot", "hi", conversation_id=None, session=None)
+
+        with patch(
+            "personal_assistant.persistence.repository.ConversationRepository",
+            return_value=mock_repo,
+        ):
+            await service.delete_conversation("ws", "Bot", conv_id, mock_session)
+
+        mock_repo.delete_conversation.assert_called_once_with(conv_id)
+
+    async def test_not_found_raises(self, service, workspace) -> None:
+        _create_agent(service)
+        mock_session = MagicMock()
+        mock_repo = MagicMock()
+        mock_repo.delete_conversation = AsyncMock(return_value=False)
+
+        with (
+            patch(
+                "personal_assistant.persistence.repository.ConversationRepository",
+                return_value=mock_repo,
+            ),
+            pytest.raises(NotFoundError),
+        ):
+            await service.delete_conversation("ws", "Bot", uuid.uuid4(), mock_session)
+
+    async def test_unknown_workspace_raises(self, service) -> None:
+        with pytest.raises(NotFoundError):
+            await service.delete_conversation("ghost", "Bot", uuid.uuid4(), MagicMock())
+
+    async def test_unknown_agent_raises(self, service, workspace) -> None:
+        _create_agent(service)
+        with pytest.raises(NotFoundError):
+            await service.delete_conversation("ws", "ghost", uuid.uuid4(), MagicMock())

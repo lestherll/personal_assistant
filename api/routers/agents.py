@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated
 
@@ -9,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import get_agent_service, get_db_session
 from api.routers.params import AgentName, WorkspaceName
-from api.schemas import AgentResponse, ChatResponse
+from api.schemas import AgentResponse, ChatResponse, ConversationResponse
 from personal_assistant.services.agent_service import AgentService
 from personal_assistant.services.schemas import (
     ChatRequest,
@@ -142,3 +143,34 @@ def reset_agent(
 ) -> None:
     conv_id = body.conversation_id if body is not None else None
     service.reset_agent(workspace_name, agent_name, conversation_id=conv_id)
+
+
+@router.get("/{agent_name}/conversations", response_model=list[ConversationResponse])
+async def list_conversations(
+    workspace_name: WorkspaceName,
+    agent_name: AgentName,
+    service: AgentServiceDep,
+    db: DbSessionDep,
+) -> list[ConversationResponse]:
+    if db is None:
+        return []
+    views = await service.list_conversations(workspace_name, agent_name, db)
+    return [ConversationResponse.from_view(v) for v in views]
+
+
+@router.delete(
+    "/{agent_name}/conversations/{conversation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def delete_conversation(
+    workspace_name: WorkspaceName,
+    agent_name: AgentName,
+    conversation_id: uuid.UUID,
+    service: AgentServiceDep,
+    db: DbSessionDep,
+) -> None:
+    if db is None:
+        from personal_assistant.services.exceptions import NotFoundError
+
+        raise NotFoundError("conversation", str(conversation_id))
+    await service.delete_conversation(workspace_name, agent_name, conversation_id, db)

@@ -140,3 +140,32 @@ class TestSaveMessage:
         assert result.role == "ai"
         assert result.content == "Hi there"
         assert result.conversation_id == conv_id
+
+
+class TestListConversations:
+    async def test_returns_conversations(self, repo, mock_session):
+        conv = Conversation(agent_name="Agent1", workspace_name="ws1")
+        mock_session.execute.return_value = _scalars_all_result([conv])
+        result = await repo.list_conversations("Agent1", "ws1")
+        assert result == [conv]
+
+    async def test_returns_empty_when_none(self, repo, mock_session):
+        mock_session.execute.return_value = _scalars_all_result([])
+        result = await repo.list_conversations("Agent1", "ws1")
+        assert result == []
+
+
+class TestDeleteConversation:
+    async def test_deletes_and_returns_true(self, repo, mock_session):
+        conv = Conversation(agent_name="Agent1")
+        mock_session.execute.return_value = _scalar_result(conv)
+        mock_session.delete = AsyncMock()
+        result = await repo.delete_conversation(uuid.uuid4())
+        assert result is True
+        mock_session.delete.assert_awaited_once_with(conv)
+        mock_session.commit.assert_awaited()
+
+    async def test_returns_false_when_not_found(self, repo, mock_session):
+        mock_session.execute.return_value = _scalar_result(None)
+        result = await repo.delete_conversation(uuid.uuid4())
+        assert result is False

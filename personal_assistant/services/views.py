@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 
@@ -37,6 +39,15 @@ class WorkspaceDetailView:
     metadata: dict[str, Any] = field(default_factory=lambda: {})
     agents: list[AgentView] = field(default_factory=lambda: [])
     tools: list[str] = field(default_factory=lambda: [])
+
+
+@dataclass
+class ConversationView:
+    id: uuid.UUID
+    agent_name: str
+    workspace_name: str | None
+    created_at: datetime
+    updated_at: datetime
 
 
 @dataclass

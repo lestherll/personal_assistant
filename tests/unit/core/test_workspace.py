@@ -42,8 +42,16 @@ class TestAgentManagement:
         workspace.remove_agent("TestAgent")
         assert "TestAgent" not in workspace.list_agents()
 
-    def test_remove_nonexistent_agent_is_safe(self, workspace):
-        workspace.remove_agent("NonExistent")  # should not raise
+    def test_remove_nonexistent_agent_raises(self, workspace):
+        with pytest.raises(KeyError, match="NonExistent"):
+            workspace.remove_agent("NonExistent")
+
+    def test_add_agent_duplicate_raises(self, workspace):
+        agent = make_mock_agent("Bot")
+        workspace.add_agent(agent)
+        duplicate = make_mock_agent("Bot")
+        with pytest.raises(ValueError, match="Bot"):
+            workspace.add_agent(duplicate)
 
     def test_get_agent_returns_correct_agent(self, workspace):
         agent = make_mock_agent("Alpha")
@@ -86,8 +94,9 @@ class TestToolManagement:
         workspace.remove_tool("search")
         assert "search" not in workspace.list_tools()
 
-    def test_remove_nonexistent_tool_is_safe(self, workspace):
-        workspace.remove_tool("ghost")  # should not raise
+    def test_remove_nonexistent_tool_raises(self, workspace):
+        with pytest.raises(KeyError, match="ghost"):
+            workspace.remove_tool("ghost")
 
     def test_add_tool_registers_with_existing_agents(self, workspace):
         agent = make_mock_agent()

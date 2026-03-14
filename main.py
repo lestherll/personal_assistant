@@ -3,14 +3,9 @@ import os
 
 from dotenv import load_dotenv
 
+from personal_assistant.bootstrap import build_registry
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.persistence.database import build_engine, build_session_factory
-from personal_assistant.providers import (
-    AnthropicProvider,
-    OllamaConfig,
-    OllamaProvider,
-    ProviderRegistry,
-)
 from personal_assistant.workspaces.default_workspace import create_default_workspace
 
 
@@ -18,9 +13,7 @@ async def main() -> None:
     load_dotenv()
 
     # --- Provider registry ---
-    registry = ProviderRegistry()
-    registry.register(AnthropicProvider())
-    registry.register(OllamaProvider(OllamaConfig(default_model="qwen2.5:14b")), default=True)
+    registry = build_registry()
 
     # --- Orchestrator + default workspace ---
     orchestrator = Orchestrator(registry)
