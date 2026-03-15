@@ -71,7 +71,7 @@ class IndeedJobSearchTool(AssistantTool[str]):
             },
         )
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
+            with urllib.request.urlopen(req, timeout=10) as resp:  # nosec B310 — fixed HTTPS API URL
                 data: dict[str, Any] = json.loads(resp.read().decode())
         except Exception as exc:
             return f"Job search request failed: {exc}"

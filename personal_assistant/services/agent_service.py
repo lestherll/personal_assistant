@@ -122,7 +122,7 @@ class AgentService:
         ws_row, agent_row = await self._get_ws_and_agent_or_raise(
             user_id, workspace_name, agent_name, session
         )
-        assert session is not None  # guaranteed by _get_ws_and_agent_or_raise
+        assert session is not None  # nosec B101 — guaranteed by _get_ws_and_agent_or_raise
 
         repo = UserWorkspaceRepository(session)
         updated = await repo.upsert_agent(
@@ -146,7 +146,7 @@ class AgentService:
         ws_row, _agent_row = await self._get_ws_and_agent_or_raise(
             user_id, workspace_name, agent_name, session
         )
-        assert session is not None  # guaranteed by _get_ws_and_agent_or_raise
+        assert session is not None  # nosec B101 — guaranteed by _get_ws_and_agent_or_raise
 
         repo = UserWorkspaceRepository(session)
         await repo.delete_agent(ws_row.id, agent_name)
