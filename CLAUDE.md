@@ -103,7 +103,7 @@ main.py                       # REPL entry point — bootstraps registry, orches
 ## Key Concepts
 
 ### Bootstrap
-`personal_assistant/bootstrap.py` exports `build_registry() -> ProviderRegistry`, which registers `AnthropicProvider` and `OllamaProvider` (set as default, model `qwen2.5:14b`). Both `main.py` (REPL) and `api/main.py` call this function; do not duplicate registration elsewhere.
+`personal_assistant/bootstrap.py` exports `build_registry() -> ProviderRegistry`, which registers `AnthropicProvider` and `OllamaProvider` (set as default, model `qwen2.5:14b`). Both `main.py` (REPL) and `api/main.py` call this function — do not duplicate registration elsewhere.
 
 ### Providers
 Registered in a `ProviderRegistry` by name. Each provider wraps a LangChain chat model and exposes `get_model(model, **kwargs)` and `async list_models() -> list[str]`. The default `list_models()` implementation returns `[default_model]`; concrete providers override it to return the full set of supported models (`AnthropicProvider` returns a hardcoded list; `OllamaProvider` queries the local `/api/tags` endpoint and falls back to `[default_model]` on error). Add new providers by subclassing `AIProvider`.
@@ -112,6 +112,17 @@ Registered in a `ProviderRegistry` by name. Each provider wraps a LangChain chat
 Created from `AgentConfig` (name, description, system_prompt, provider, model, allowed_tools). Maintain their own conversation history across turns. Rebuilt automatically when tools are added/removed.
 
 `agents/__init__.py` exports `DEFAULT_AGENTS: dict[str, Callable[[ProviderRegistry], Agent]]` — a lazy factory dict of the four built-in agents. Agents are not instantiated until requested.
+
+`AgentConfig` fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | `str` | Identity key across all tiers |
+| `description` | `str` | Purpose summary — also used by the supervisor for routing |
+| `system_prompt` | `str` | LLM system message |
+| `provider` | `str \| None` | Registry key; `None` → registry default |
+| `model` | `str \| None` | Model name; `None` → provider default |
+| `allowed_tools` | `list[str]` | Tool names this agent may use |
 
 ### Workspaces
 Named containers for agents and tools. Tools added to a workspace are auto-registered with all compatible agents. Supports `add_agent`, `remove_agent`, `replace_agent`, `add_tool`, `remove_tool`. Each workspace owns a `WorkspaceSupervisor` that routes workspace-level chat to the most suitable agent.
@@ -146,6 +157,7 @@ Stateless JWT auth built on `pwdlib` (Argon2 hashing) and `PyJWT` (HS256 tokens)
 Future backends can be added by subclassing `ConversationCache` (e.g. `RedisConversationCache`).
 
 ### Services
+
 **`AgentService`** (`services/agent_service.py`) — DB-first, stateless singleton.
 
 - Constructor: `AgentService(registry, tools, cache)` where `tools` is the global list of available tools and `cache` is a `ConversationCache` instance.
@@ -159,10 +171,10 @@ Future backends can be added by subclassing `ConversationCache` (e.g. `RedisConv
 - Provides CRUD over `UserWorkspace` DB rows: `create_workspace`, `list_workspaces`, `get_workspace`, `update_workspace`, `delete_workspace`.
 - Chat: `chat(...)` and `stream_chat(...)`. When `agent_name` is provided, delegates directly to `AgentService`. Without `agent_name`, loads the workspace's agents from the DB and calls `route()` (lightweight LLM call) to select the best agent, then delegates.
 
-Pydantic schemas in `schemas.py` describe request payloads; frozen dataclass views in `views.py` describe responses.
+Pydantic schemas in `services/schemas.py` describe request payloads; frozen dataclass views in `services/views.py` describe responses.
 
 ### REST API
-FastAPI app in `api/`. Singleton `AgentService` and `WorkspaceService` are created once in the `lifespan` hook and stored on `app.state`. Routers retrieve them via `get_agent_service` / `get_workspace_service` DI functions. A template `Orchestrator` is also stored on `app.state` as a fallback for dev mode. Exception handlers in `api/exception_handlers.py` convert service exceptions to HTTP status codes; a catch-all `Exception` handler returns `{"error": "internal_server_error"}` with 500 and logs the full traceback. Start with `uv run fastapi dev api/main.py`.
+FastAPI app in `api/`. Singleton `AgentService` and `WorkspaceService` are created once in the `lifespan` hook and stored on `app.state`. Routers retrieve them via `get_agent_service` / `get_workspace_service` DI functions. Exception handlers in `api/exception_handlers.py` convert service exceptions to HTTP status codes; a catch-all `Exception` handler returns `{"error": "internal_server_error"}` with 500 and logs the full traceback. Start with `uv run fastapi dev api/main.py`.
 
 **Authentication endpoints** (`/auth/register`, `/auth/login`, `/auth/refresh`) — open (no token required). All other endpoints require `Authorization: Bearer <token>`.
 
@@ -170,17 +182,44 @@ FastAPI app in `api/`. Singleton `AgentService` and `WorkspaceService` are creat
 
 **Workspace chat** (`POST /workspaces/{name}/chat`) supports two routing modes controlled by the `WorkspaceChatRequest` body:
 - **Supervisor path** (default): omit `agent_name`; the supervisor LLM picks the best agent via `route()`. Uses `conversation_id` to thread turns.
-- **Agent-direct path**: set `agent_name` to skip the supervisor. Optionally set `provider` and/or `model` to override the LLM for this turn only (ephemeral — not cached). Returns `conversation_id` that can be passed back on subsequent turns.
+- **Agent-direct path**: set `agent_name` to skip the supervisor. Optionally set `provider` and/or `model` to override the LLM for this turn only (ephemeral — not persisted). Returns `conversation_id` that can be passed back on subsequent turns.
 
-**Workspace streaming** (`POST /workspaces/{name}/chat/stream`) requires `agent_name` (supervisor streaming is not supported). Returns `text/event-stream` with `data: {token}\n\n` lines and a `data: [DONE]\n\n` sentinel. `X-Conversation-Id` and `X-Agent-Used` response headers carry the conversation metadata.
+**Workspace streaming** (`POST /workspaces/{name}/chat/stream`) requires `agent_name` (supervisor streaming is not supported). Returns `text/event-stream` with `data: {token}\n\n` lines and a `data: [DONE]\n\n` sentinel. `X-Conversation-Id` and `X-Agent-Used` response headers carry conversation metadata.
 
 **Provider discovery** (`GET /providers/`, `GET /providers/{name}/models`) lists registered providers and their available models.
+
+### Endpoint Reference
+
+| Method | Path | Description | Auth |
+|---|---|---|---|
+| `GET` | `/health` | Liveness probe | No |
+| `POST` | `/auth/register` | Register a new user | No |
+| `POST` | `/auth/login` | Log in, receive access + refresh tokens | No |
+| `POST` | `/auth/refresh` | Refresh access token | No |
+| `GET` | `/providers/` | List all registered providers | Yes |
+| `GET` | `/providers/{name}/models` | List available models for a provider | Yes |
+| `POST` | `/workspaces/` | Create a workspace | Yes |
+| `GET` | `/workspaces/` | List workspaces for the current user | Yes |
+| `GET` | `/workspaces/{workspace_name}` | Get workspace details | Yes |
+| `PATCH` | `/workspaces/{workspace_name}` | Update workspace metadata | Yes |
+| `DELETE` | `/workspaces/{workspace_name}` | Delete a workspace | Yes |
+| `POST` | `/workspaces/{workspace_name}/chat` | Workspace chat — supervisor or agent-direct | Yes |
+| `POST` | `/workspaces/{workspace_name}/chat/stream` | Streaming workspace chat — agent-direct only (SSE) | Yes |
+| `POST` | `/workspaces/{workspace_name}/agents/` | Create an agent | Yes |
+| `GET` | `/workspaces/{workspace_name}/agents/` | List agents in a workspace | Yes |
+| `GET` | `/workspaces/{workspace_name}/agents/{agent_name}` | Get agent details | Yes |
+| `PATCH` | `/workspaces/{workspace_name}/agents/{agent_name}` | Update agent config | Yes |
+| `DELETE` | `/workspaces/{workspace_name}/agents/{agent_name}` | Delete an agent | Yes |
+| `POST` | `/workspaces/{workspace_name}/agents/{agent_name}/chat` | Non-streaming agent chat | Yes |
+| `POST` | `/workspaces/{workspace_name}/agents/{agent_name}/chat/stream` | Streaming agent chat (SSE) | Yes |
+| `GET` | `/workspaces/{workspace_name}/agents/{agent_name}/conversations` | List conversations (requires DB) | Yes |
+| `DELETE` | `/workspaces/{workspace_name}/agents/{agent_name}/conversations/{id}` | Delete a conversation (requires DB) | Yes |
 
 ### Persistence
 Async SQLAlchemy + asyncpg backed by PostgreSQL. ORM models live in `persistence/models.py`: `User`, `UserWorkspace`, `UserAgent`, `Conversation`, `Message`. Set `DATABASE_URL` to enable; omit it only when `AUTH_DISABLED=true` (in-memory dev mode). Use Alembic for migrations (`uv run alembic upgrade head`).
 
 ### Evaluation (optional)
-DeepEval-based evaluation tests for chat endpoints. Located in `tests/evaluation/api/`. Tests use an Ollama-backed judge model (`qwen2.5:14b`) to evaluate LLM responses for relevancy, correctness, and toxicity. Run with `uv run pytest -m evaluation tests/evaluation/` (requires local Ollama running at `http://localhost:11434`). Streaming endpoints use SSE with raw text tokens and `[DONE]` sentinel; non-streaming endpoints use JSON request/response format. Use `timeout=120.0` when making requests to LLM-backed endpoints to avoid timeout errors.
+DeepEval-based evaluation tests in `tests/evaluation/api/`. Tests use an Ollama-backed judge model (`qwen2.5:14b`) to evaluate LLM responses for relevancy, correctness, and toxicity. Run with `uv run pytest -m evaluation tests/evaluation/` (requires local Ollama at `http://localhost:11434`). Use `timeout=120.0` for LLM-backed requests.
 
 ## Environment
 
@@ -214,11 +253,11 @@ uv run alembic upgrade head                    # Apply DB migrations
 
 ## Conventions
 
-- New tools: subclass `AssistantTool` in `personal_assistant/tools/`, define `name`, `description`, `args_schema` (Pydantic model), and `_run()`. To give a tool access to the calling agent's `AgentConfig`, add an `agent_config: AgentConfig | None = None` field — `Agent.register_tool` detects this via `model_fields` and injects a copy automatically via `model_copy`, so each agent gets its own bound instance and the original tool is never mutated.
-- New agents: subclass `Agent` (see `career_agent.py`, `coding_agent.py`, `research_agent.py` for examples) or use `AgentConfig` directly with `orchestrator.create_agent()`. Use `AgentService` when calling from service/API layers.
-- New providers: subclass `AIProvider` in `personal_assistant/providers/`, implement `get_model()`, register via `build_registry()` in `personal_assistant/bootstrap.py`.
-- New workspaces: add a factory function in `personal_assistant/workspaces/`. Use `WorkspaceService` when calling from service/API layers.
-- New API endpoints: add a router in `api/routers/`, include it in `api/main.py`, and add any new service exceptions to `api/exception_handlers.py`. Reuse or extend annotated path parameters from `api/routers/params.py`.
+- **New tools:** subclass `AssistantTool` in `personal_assistant/tools/`, define `name`, `description`, `args_schema` (Pydantic model), and `_run()`. To give a tool access to the calling agent's `AgentConfig`, add an `agent_config: AgentConfig | None = None` field — `Agent.register_tool` detects this via `model_fields` and injects a copy automatically via `model_copy`, so each agent gets its own bound instance and the original tool is never mutated.
+- **New agents:** subclass `Agent` (see `career_agent.py`, `coding_agent.py`, `research_agent.py` for examples) or use `AgentConfig` directly with `orchestrator.create_agent()`. Use `AgentService` when calling from service/API layers.
+- **New providers:** subclass `AIProvider` in `personal_assistant/providers/`, implement `get_model()`, register via `build_registry()` in `personal_assistant/bootstrap.py`.
+- **New workspaces:** add a factory function in `personal_assistant/workspaces/`. Use `WorkspaceService` when calling from service/API layers.
+- **New API endpoints:** add a router in `api/routers/`, include it in `api/main.py`, and add any new service exceptions to `api/exception_handlers.py`. Reuse or extend annotated path parameters from `api/routers/params.py`.
 - Do not hardcode API keys — always use `.env`.
 - Agent conversation history is cached per `(user_id, workspace_name, conversation_id)` in `InMemoryConversationCache`. The cache is automatically updated after each `run_agent` / `stream_agent` call. Call `AgentService.delete_conversation` to remove a conversation and invalidate its cache entry.
 - `DATABASE_URL` is optional. When absent, the app runs fully in-memory with no persistence. Conversation list/delete endpoints return empty lists / 404 when no DB is configured.
@@ -227,3 +266,4 @@ uv run alembic upgrade head                    # Apply DB migrations
 - Password hashing uses `pwdlib` with Argon2 (`auth/password.py`). JWT tokens use `PyJWT` with HS256 (`auth/tokens.py`). Do not use `passlib` or `python-jose`.
 - All workspace/agent routes require `CurrentUserDep`. Services receive `user_id` and `session` as explicit arguments — they hold no per-user state.
 - `AgentService` and `WorkspaceService` are **stateless singletons** created once at startup. Never add per-request or per-user state to them.
+- Updating an agent rebuilds it entirely — there is no soft update path. Agent config changes (system prompt, model, allowed tools) may require a new LangGraph graph. Clients that need stateful conversations should not update agents mid-conversation.
