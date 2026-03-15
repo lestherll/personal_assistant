@@ -26,6 +26,7 @@ ci = [
     "pip-audit>=2.10.0",
 ]
 dev = [
+    "aiosqlite>=0.22.1",
     "deepeval>=0.21.76",
     "httpx>=0.28.1",
     "mypy>=1.19.1",

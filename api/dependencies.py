@@ -24,7 +24,7 @@ DEV_USER = User(
     id=uuid.UUID(int=0),
     username="dev",
     email="dev@local",
-    hashed_password="",
+    hashed_password="",  # nosec B106 — dev-mode sentinel, no real password
     is_active=True,
     created_at=datetime.now(UTC),
     updated_at=datetime.now(UTC),

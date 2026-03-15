@@ -102,7 +102,7 @@ class WorkspaceService:
         session: AsyncSession | None = None,
     ) -> WorkspaceView:
         ws_row, _agent_rows = await self._get_ws_or_raise(user_id, name, session)
-        assert session is not None  # guaranteed by _get_ws_or_raise
+        assert session is not None  # nosec B101 — guaranteed by _get_ws_or_raise
 
         repo = UserWorkspaceRepository(session)
         updated = await repo.upsert_workspace(
@@ -117,7 +117,7 @@ class WorkspaceService:
         session: AsyncSession | None = None,
     ) -> None:
         await self._get_ws_or_raise(user_id, name, session)
-        assert session is not None  # guaranteed by _get_ws_or_raise
+        assert session is not None  # nosec B101 — guaranteed by _get_ws_or_raise
 
         repo = UserWorkspaceRepository(session)
         await repo.delete_workspace(user_id, name)

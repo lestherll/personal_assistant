@@ -11,19 +11,22 @@ from __future__ import annotations
 
 import os
 
-# deepeval's pytest plugin loads .env at import time (before conftest runs), which can set
-# AUTH_DISABLED=false from the project's .env file.  When no DATABASE_URL is configured
-# the app requires AUTH_DISABLED=true to start, so we enforce it here for tests.
-if not os.environ.get("DATABASE_URL"):
-    os.environ["AUTH_DISABLED"] = "true"
+# AUTH_DISABLED must be set before api.main is imported because
+# api/dependencies.py evaluates it at module level.  DATABASE_URL is set
+# inside the live_server_url fixture (only needed before the server starts).
+os.environ["AUTH_DISABLED"] = "true"
 
 import socket
+import tempfile
 import threading
+import uuid as _uuid
 from collections.abc import AsyncIterator
 
 import httpx
 import pytest
+import sqlalchemy
 import uvicorn
+from sqlalchemy.orm import Session
 
 from api.main import app
 
@@ -35,6 +38,72 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _seed_database(db_file: str) -> None:
+    """Create tables and seed the DEV_USER + default workspace synchronously."""
+    from personal_assistant.bootstrap import build_registry
+    from personal_assistant.core.orchestrator import Orchestrator
+    from personal_assistant.persistence.models import Base, User, UserAgent, UserWorkspace
+    from personal_assistant.workspaces.default_workspace import create_default_workspace
+
+    sync_url = f"sqlite:///{db_file}"
+    engine = sqlalchemy.create_engine(sync_url)
+    Base.metadata.create_all(engine)
+
+    dev_user_id = _uuid.UUID(int=0)
+
+    with Session(engine) as session:
+        # Skip seeding if already done (e.g. re-used fixture)
+        if session.get(User, dev_user_id) is not None:
+            engine.dispose()
+            return
+
+        # Insert the DEV_USER sentinel so FK constraints are satisfied
+        session.add(
+            User(
+                id=dev_user_id,
+                username="dev",
+                email="dev@local",
+                hashed_password="",
+                is_active=True,
+            )
+        )
+        session.flush()
+
+        # Build the default workspace from the template orchestrator and
+        # persist it as UserWorkspace/UserAgent rows for the DEV_USER.
+        registry = build_registry()
+        orchestrator = Orchestrator(registry)
+        default_ws = create_default_workspace(orchestrator)
+
+        ws_row = UserWorkspace(
+            user_id=dev_user_id,
+            name=default_ws.config.name,
+            description=default_ws.config.description,
+        )
+        session.add(ws_row)
+        session.flush()
+
+        for agent_name in default_ws.list_agents():
+            agent = default_ws.get_agent(agent_name)
+            if agent is None:
+                continue
+            session.add(
+                UserAgent(
+                    user_workspace_id=ws_row.id,
+                    name=agent.config.name,
+                    description=agent.config.description,
+                    system_prompt=agent.config.system_prompt,
+                    provider=agent.config.provider,
+                    model=agent.config.model,
+                    allowed_tools=list(agent.config.allowed_tools),
+                )
+            )
+
+        session.commit()
+
+    engine.dispose()
+
+
 @pytest.fixture(scope="session")
 def live_server_url() -> str:
     """Start a Uvicorn server in a background thread and return its base URL.
@@ -43,6 +112,11 @@ def live_server_url() -> str:
     Running in a thread (not a coroutine) means the server's event loop is
     always active — tests that run their own event loops can still reach it.
     """
+    # Create a temp SQLite file and seed it before the server starts.
+    db_file = tempfile.mktemp(suffix=".db", prefix="test_pa_")
+    os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_file}"
+    _seed_database(db_file)
+
     port = _free_port()
     config = uvicorn.Config(app, host="127.0.0.1", port=port, lifespan="on", log_level="warning")
     server = uvicorn.Server(config)
