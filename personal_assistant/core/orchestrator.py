@@ -196,7 +196,8 @@ class Orchestrator:
             case _:
                 raise RuntimeError("No agent found to delegate to.")
 
-        return await agent.run(task, session=session)
+        result = await agent.run(task, session=session)
+        return result.content
 
     async def delegate_to_workspace(
         self,

@@ -105,8 +105,9 @@ class TestToolManagement:
 
 class TestRunAndHistory:
     async def test_run_returns_last_message_content(self, agent) -> None:
-        response = await agent.run("Hello")
-        assert response == "Test response"
+        result = await agent.run("Hello")
+        assert result.content == "Test response"
+        assert result.agent_used == "TestAgent"
 
     async def test_run_appends_to_history(self, agent) -> None:
         await agent.run("Hello")

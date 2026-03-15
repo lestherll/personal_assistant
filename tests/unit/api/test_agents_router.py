@@ -378,7 +378,8 @@ _NOW = datetime.now(UTC)
 def make_conv_view(conv_id: uuid.UUID | None = None) -> ConversationView:
     return ConversationView(
         id=conv_id or uuid.uuid4(),
-        workspace_name="ws1",
+        workspace_id=uuid.uuid4(),
+        user_id=None,
         created_at=_NOW,
         updated_at=_NOW,
     )

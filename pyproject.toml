@@ -82,6 +82,7 @@ indent-style = "space"
 
 [tool.mypy]
 python_version = "3.13"
+exclude = "tests/"
 strict = true
 pretty = true
 # Third-party libraries without stubs — ignore missing imports

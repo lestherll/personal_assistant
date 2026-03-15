@@ -3,7 +3,7 @@
 Provides a pluggable caching layer for conversation message histories so that
 repeated requests within a session can skip the database round-trip.
 
-Key schema: ``(user_id, workspace_name, conversation_id)``
+Key schema: ``(user_id, workspace_id, conversation_id)``
 
 Implementations
 ---------------
@@ -23,7 +23,7 @@ from collections import OrderedDict
 
 from langchain_core.messages import BaseMessage
 
-_CacheKey = tuple[uuid.UUID, str, uuid.UUID]
+_CacheKey = tuple[uuid.UUID, uuid.UUID, uuid.UUID]
 
 
 class ConversationCache(ABC):
@@ -33,7 +33,7 @@ class ConversationCache(ABC):
     async def get(
         self,
         user_id: uuid.UUID,
-        workspace_name: str,
+        workspace_id: uuid.UUID,
         conversation_id: uuid.UUID,
     ) -> list[BaseMessage] | None:
         """Return cached messages or ``None`` on a miss."""
@@ -42,7 +42,7 @@ class ConversationCache(ABC):
     async def set(
         self,
         user_id: uuid.UUID,
-        workspace_name: str,
+        workspace_id: uuid.UUID,
         conversation_id: uuid.UUID,
         messages: list[BaseMessage],
     ) -> None:
@@ -52,7 +52,7 @@ class ConversationCache(ABC):
     async def invalidate(
         self,
         user_id: uuid.UUID,
-        workspace_name: str,
+        workspace_id: uuid.UUID,
         conversation_id: uuid.UUID,
     ) -> None:
         """Remove the entry for the given key (no-op if absent)."""
@@ -72,18 +72,18 @@ class InMemoryConversationCache(ConversationCache):
     def _key(
         self,
         user_id: uuid.UUID,
-        workspace_name: str,
+        workspace_id: uuid.UUID,
         conversation_id: uuid.UUID,
     ) -> _CacheKey:
-        return (user_id, workspace_name, conversation_id)
+        return (user_id, workspace_id, conversation_id)
 
     async def get(
         self,
         user_id: uuid.UUID,
-        workspace_name: str,
+        workspace_id: uuid.UUID,
         conversation_id: uuid.UUID,
     ) -> list[BaseMessage] | None:
-        key = self._key(user_id, workspace_name, conversation_id)
+        key = self._key(user_id, workspace_id, conversation_id)
         if key not in self._store:
             return None
         # Move to end (most recently used)
@@ -93,11 +93,11 @@ class InMemoryConversationCache(ConversationCache):
     async def set(
         self,
         user_id: uuid.UUID,
-        workspace_name: str,
+        workspace_id: uuid.UUID,
         conversation_id: uuid.UUID,
         messages: list[BaseMessage],
     ) -> None:
-        key = self._key(user_id, workspace_name, conversation_id)
+        key = self._key(user_id, workspace_id, conversation_id)
         if key in self._store:
             self._store.move_to_end(key)
         self._store[key] = list(messages)
@@ -107,8 +107,8 @@ class InMemoryConversationCache(ConversationCache):
     async def invalidate(
         self,
         user_id: uuid.UUID,
-        workspace_name: str,
+        workspace_id: uuid.UUID,
         conversation_id: uuid.UUID,
     ) -> None:
-        key = self._key(user_id, workspace_name, conversation_id)
+        key = self._key(user_id, workspace_id, conversation_id)
         self._store.pop(key, None)

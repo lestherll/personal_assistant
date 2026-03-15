@@ -20,6 +20,18 @@ if TYPE_CHECKING:
 
 
 @dataclass
+class AgentRunResult:
+    """Returned by :meth:`Agent.run` — carries the reply and observability metadata."""
+
+    content: str
+    agent_used: str
+    provider: str | None
+    model: str | None
+    prompt_tokens: int | None
+    completion_tokens: int | None
+
+
+@dataclass
 class AgentConfig:
     name: str
     description: str
@@ -28,6 +40,8 @@ class AgentConfig:
     model: str | None = None  # Model name — None means use the provider's default
     # Names of tools this agent is allowed to use (empty = accept all added tools)
     allowed_tools: list[str] = field(default_factory=list)
+    # DB primary key for this agent row — injected by the service layer when known
+    agent_id: uuid.UUID | None = None
 
 
 class Agent:
@@ -294,7 +308,7 @@ class Agent:
     async def start_conversation(
         self,
         session: AsyncSession,
-        workspace_name: str,
+        workspace_id: uuid.UUID,
         user_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         """Create a new conversation in the DB and bind this agent to it.
@@ -304,7 +318,7 @@ class Agent:
         from personal_assistant.persistence.repository import ConversationRepository
 
         repo = ConversationRepository(session)
-        conv = await repo.create_conversation(workspace_name, user_id=user_id)
+        conv = await repo.create_conversation(workspace_id, user_id=user_id)
         self._conversation_id = conv.id
         self._history_loaded = True  # Fresh conversation — nothing to load
         self._history = []
@@ -333,37 +347,65 @@ class Agent:
         result_messages = result.get("messages", [])
         return result_messages[len(messages) :]
 
-    async def run(self, task: str, session: AsyncSession | None = None) -> str:
-        """Run a task and return the agent's final text response.
+    async def run(self, task: str, session: AsyncSession | None = None) -> AgentRunResult:
+        """Run a task and return an :class:`AgentRunResult` with the response and metadata.
 
         Automatically rebuilds the graph if tools have changed since last run.
         """
+        from personal_assistant.persistence.models import MessageRole
+        from personal_assistant.persistence.repository import ConversationRepository
+
         self._ensure_graph()
         await self._ensure_history_loaded(session)
         self._history.append(HumanMessage(content=task))
 
-        _meta: dict[str, object] = {
-            "agent_name": self.config.name,
-            "provider": self.config.provider,
-            "model": self.config.model,
-        }
         if session is not None and self._conversation_id is not None:
-            from personal_assistant.persistence.repository import ConversationRepository
-
             repo = ConversationRepository(session)
-            await repo.save_message(self._conversation_id, "human", task, metadata=_meta)
+            await repo.add_message(
+                self._conversation_id,
+                MessageRole.human,
+                task,
+                agent_id=self.config.agent_id,
+                provider=self.config.provider,
+                model=self.config.model,
+            )
 
         result = await self._graph.ainvoke({"messages": self._history})
         self._history = result["messages"]
         content = self._history[-1].content
         response = content if isinstance(content, str) else str(content)
 
+        # Extract token counts from the last AIMessage (never fail on missing metadata)
+        last_ai = next(
+            (m for m in reversed(self._history) if isinstance(m, AIMessage)),
+            None,
+        )
+        usage = getattr(last_ai, "usage_metadata", None) if last_ai is not None else None
+        prompt_tokens: int | None = usage.get("input_tokens") if usage else None
+        completion_tokens: int | None = usage.get("output_tokens") if usage else None
+
         if session is not None and self._conversation_id is not None:
             repo = ConversationRepository(session)
-            await repo.save_message(self._conversation_id, "ai", response, metadata=_meta)
+            await repo.add_message(
+                self._conversation_id,
+                MessageRole.ai,
+                response,
+                agent_id=self.config.agent_id,
+                provider=self.config.provider,
+                model=self.config.model,
+                prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
             await repo.touch_conversation(self._conversation_id)
 
-        return response
+        return AgentRunResult(
+            content=response,
+            agent_used=self.config.name,
+            provider=self.config.provider,
+            model=self.config.model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        )
 
     async def stream(
         self, task: str, session: AsyncSession | None = None
@@ -372,20 +414,23 @@ class Agent:
 
         Automatically rebuilds the graph if tools have changed since last stream.
         """
+        from personal_assistant.persistence.models import MessageRole
+        from personal_assistant.persistence.repository import ConversationRepository
+
         self._ensure_graph()
         await self._ensure_history_loaded(session)
         self._history.append(HumanMessage(content=task))
 
-        _meta: dict[str, object] = {
-            "agent_name": self.config.name,
-            "provider": self.config.provider,
-            "model": self.config.model,
-        }
         if session is not None and self._conversation_id is not None:
-            from personal_assistant.persistence.repository import ConversationRepository
-
             repo = ConversationRepository(session)
-            await repo.save_message(self._conversation_id, "human", task, metadata=_meta)
+            await repo.add_message(
+                self._conversation_id,
+                MessageRole.human,
+                task,
+                agent_id=self.config.agent_id,
+                provider=self.config.provider,
+                model=self.config.model,
+            )
 
         async for chunk in self._graph.astream(
             {"messages": self._history},
@@ -399,8 +444,20 @@ class Agent:
             last = self._history[-1]
             if isinstance(last, AIMessage):
                 ai_content = last.content if isinstance(last.content, str) else str(last.content)
+                usage = getattr(last, "usage_metadata", None)
+                prompt_tokens: int | None = usage.get("input_tokens") if usage else None
+                completion_tokens: int | None = usage.get("output_tokens") if usage else None
                 repo = ConversationRepository(session)
-                await repo.save_message(self._conversation_id, "ai", ai_content, metadata=_meta)
+                await repo.add_message(
+                    self._conversation_id,
+                    MessageRole.ai,
+                    ai_content,
+                    agent_id=self.config.agent_id,
+                    provider=self.config.provider,
+                    model=self.config.model,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
                 await repo.touch_conversation(self._conversation_id)
 
     def clone(self, *, llm: BaseChatModel | None = None) -> Agent:
@@ -441,7 +498,9 @@ class Agent:
 
 def row_to_message(row: MessageRow) -> BaseMessage:
     """Convert a persisted Message row back to a LangChain BaseMessage."""
-    if row.role == "human":
+    from personal_assistant.persistence.models import MessageRole
+
+    if row.role == MessageRole.human:
         return HumanMessage(content=row.content)
     return AIMessage(content=row.content)
 

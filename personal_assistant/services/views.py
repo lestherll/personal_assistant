@@ -41,10 +41,11 @@ class WorkspaceDetailView:
     tools: list[str] = field(default_factory=lambda: [])
 
 
-@dataclass
+@dataclass(frozen=True)
 class ConversationView:
     id: uuid.UUID
-    workspace_name: str
+    workspace_id: uuid.UUID
+    user_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
 

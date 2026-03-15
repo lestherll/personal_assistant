@@ -1,9 +1,21 @@
 from __future__ import annotations
 
+import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, String, Text, UniqueConstraint, Uuid
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    Uuid,
+)
+from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -13,6 +25,15 @@ _JSON = JSON().with_variant(JSONB(), "postgresql")
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+class MessageRole(enum.StrEnum):
+    """Valid values for Message.role. Enforced as a PostgreSQL enum type."""
+
+    human = "human"
+    ai = "ai"
+    system = "system"
+    tool = "tool"
 
 
 class Base(DeclarativeBase):
@@ -67,6 +88,9 @@ class UserWorkspace(Base):
     agents: Mapped[list[UserAgent]] = relationship(
         "UserAgent", back_populates="workspace", cascade="all, delete-orphan"
     )
+    conversations: Mapped[list[Conversation]] = relationship(
+        "Conversation", back_populates="workspace", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         return f"UserWorkspace(id={self.id!s}, name={self.name!r})"
@@ -110,7 +134,12 @@ class Conversation(Base):
     __tablename__ = "conversations"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    workspace_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("user_workspaces.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -124,15 +153,24 @@ class Conversation(Base):
         DateTime(timezone=True), nullable=False, default=_now, onupdate=_now
     )
 
+    workspace: Mapped[UserWorkspace] = relationship("UserWorkspace", back_populates="conversations")
     messages: Mapped[list[Message]] = relationship(
         "Message",
         back_populates="conversation",
-        order_by="Message.created_at",
+        order_by="Message.sequence_index",
         cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:
-        return f"Conversation(id={self.id!s}, workspace={self.workspace_name!r})"
+        return f"Conversation(id={self.id!s}, workspace_id={self.workspace_id!s})"
+
+
+# Cross-dialect enum: uses a native PostgreSQL ENUM on Postgres, plain VARCHAR elsewhere.
+_MessageRoleType = PgEnum(
+    MessageRole,
+    name="message_role",
+    create_type=False,  # created by migration 0005
+).with_variant(String(50), "sqlite")
 
 
 class Message(Base):
@@ -146,11 +184,23 @@ class Message(Base):
         ForeignKey("conversations.id", ondelete="CASCADE"),
         nullable=False,
     )
-    # "human" | "ai" | "tool"
-    role: Mapped[str] = mapped_column(String(50), nullable=False)
+    role: Mapped[MessageRole] = mapped_column(_MessageRoleType, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    # Optional structured metadata (tool call details, model name, etc.)
+    # Optional structured metadata (tool call details, etc.)
     extra_metadata: Mapped[dict[str, object] | None] = mapped_column(_JSON, nullable=True)
+    # Which agent produced this message (nullable for human messages and if agent deleted)
+    agent_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("user_agents.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Monotonic ordering within a conversation (assigned by repository with row lock)
+    sequence_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Observability: which provider/model produced this message and token counts
+    provider: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )

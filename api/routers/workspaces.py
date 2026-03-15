@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated
 
@@ -15,6 +16,7 @@ from api.dependencies import (
 )
 from api.routers.params import WorkspaceName
 from api.schemas import (
+    AgentParticipationResponse,
     ConversationResponse,
     WorkspaceChatResponse,
     WorkspaceDetailResponse,
@@ -170,3 +172,21 @@ async def list_workspace_conversations(
         return []
     views = await agent_service.list_conversations(current_user.id, name, db)
     return [ConversationResponse.from_view(v) for v in views]
+
+
+@router.get(
+    "/{name}/conversations/{conversation_id}/agents",
+    response_model=list[AgentParticipationResponse],
+)
+async def list_conversation_agents(
+    name: WorkspaceName,
+    conversation_id: uuid.UUID,
+    agent_service: AgentServiceDep,
+    db: DbSessionDep,
+    current_user: CurrentUserDep,
+) -> list[AgentParticipationResponse]:
+    """Return which agents contributed messages to a conversation, with message counts."""
+    if db is None:
+        return []
+    views = await agent_service.list_agent_participation(current_user.id, name, conversation_id, db)
+    return [AgentParticipationResponse.from_view(v) for v in views]

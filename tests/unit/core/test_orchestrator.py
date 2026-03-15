@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 import pytest
 
-from personal_assistant.core.agent import AgentConfig
+from personal_assistant.core.agent import AgentConfig, AgentRunResult
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.core.workspace import WorkspaceConfig
 from personal_assistant.providers.registry import ProviderRegistry
@@ -69,9 +69,19 @@ class TestDelegation:
     ) -> None:
         from unittest.mock import AsyncMock
 
+        def _make_result(content: str) -> AgentRunResult:
+            return AgentRunResult(
+                content=content,
+                agent_used="Alpha",
+                provider=None,
+                model=None,
+                prompt_tokens=None,
+                completion_tokens=None,
+            )
+
         ws = orchestrator.create_workspace(workspace_config)
         agent = make_mock_agent("Alpha")
-        agent.run = AsyncMock(return_value="response")
+        agent.run = AsyncMock(return_value=_make_result("response"))
         ws.add_agent(agent)
         result = await orchestrator.delegate("Do something")
         agent.run.assert_called_once_with("Do something", session=None)
@@ -80,11 +90,21 @@ class TestDelegation:
     async def test_delegate_to_named_agent(self, orchestrator, workspace_config) -> None:
         from unittest.mock import AsyncMock
 
+        def _r(name: str, content: str) -> AgentRunResult:
+            return AgentRunResult(
+                content=content,
+                agent_used=name,
+                provider=None,
+                model=None,
+                prompt_tokens=None,
+                completion_tokens=None,
+            )
+
         ws = orchestrator.create_workspace(workspace_config)
         agent_a = make_mock_agent("Alpha")
         agent_b = make_mock_agent("Beta")
-        agent_a.run = AsyncMock(return_value="from alpha")
-        agent_b.run = AsyncMock(return_value="from beta")
+        agent_a.run = AsyncMock(return_value=_r("Alpha", "from alpha"))
+        agent_b.run = AsyncMock(return_value=_r("Beta", "from beta"))
         ws.add_agent(agent_a)
         ws.add_agent(agent_b)
         await orchestrator.delegate("task", agent_name="Beta")
@@ -94,10 +114,20 @@ class TestDelegation:
     async def test_delegate_to_named_workspace(self, orchestrator) -> None:
         from unittest.mock import AsyncMock
 
+        def _r(content: str) -> AgentRunResult:
+            return AgentRunResult(
+                content=content,
+                agent_used="Bot",
+                provider=None,
+                model=None,
+                prompt_tokens=None,
+                completion_tokens=None,
+            )
+
         orchestrator.create_workspace(WorkspaceConfig(name="ws1", description=""))
         ws2 = orchestrator.create_workspace(WorkspaceConfig(name="ws2", description=""))
         agent = make_mock_agent("Bot")
-        agent.run = AsyncMock(return_value="from ws2")
+        agent.run = AsyncMock(return_value=_r("from ws2"))
         ws2.add_agent(agent)
         await orchestrator.delegate("task", workspace_name="ws2")
         agent.run.assert_called_once_with("task", session=None)

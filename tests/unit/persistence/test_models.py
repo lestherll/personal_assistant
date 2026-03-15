@@ -9,10 +9,11 @@ from personal_assistant.persistence.models import Conversation, Message, _now
 
 
 class TestConversationModel:
-    def test_repr_contains_workspace_name(self):
-        conv = Conversation(workspace_name="default")
+    def test_repr_contains_workspace_id(self):
+        ws_id = uuid.uuid4()
+        conv = Conversation(workspace_id=ws_id)
         r = repr(conv)
-        assert "default" in r
+        assert str(ws_id) in r
 
     def test_id_column_has_uuid4_default(self):
 

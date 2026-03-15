@@ -94,17 +94,18 @@ def _mock_conv_repo(conv=None, messages=None, deleted=True):
     repo.get_conversation_for_workspace = AsyncMock(return_value=conv)
     repo.create_conversation = AsyncMock(return_value=conv)
     repo.load_messages = AsyncMock(return_value=messages or [])
-    repo.save_message = AsyncMock()
+    repo.add_message = AsyncMock()
     repo.touch_conversation = AsyncMock()
     repo.delete_conversation = AsyncMock(return_value=deleted)
     repo.list_conversations = AsyncMock(return_value=[conv] if conv else [])
+    repo.list_agent_participation = AsyncMock(return_value=[])
     return repo
 
 
-def _make_mock_conv(conv_id=None, workspace_name="ws", user_id=None):
+def _make_mock_conv(conv_id=None, workspace_id=None, user_id=None):
     conv = MagicMock()
     conv.id = conv_id or uuid.uuid4()
-    conv.workspace_name = workspace_name
+    conv.workspace_id = workspace_id or uuid.uuid4()
     conv.user_id = user_id
     conv.created_at = datetime.now(UTC)
     conv.updated_at = datetime.now(UTC)
@@ -408,7 +409,7 @@ class TestRunAgent:
         self, service, user_id, mock_ws_row, mock_agent_row
     ):
         session = AsyncMock()
-        conv = _make_mock_conv(user_id=user_id)
+        conv = _make_mock_conv(workspace_id=mock_ws_row.id, user_id=user_id)
         ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
         conv_repo = _mock_conv_repo(conv=conv)
 
@@ -426,11 +427,13 @@ class TestRunAgent:
     ):
         session = AsyncMock()
         existing_conv_id = uuid.uuid4()
-        conv = _make_mock_conv(conv_id=existing_conv_id, user_id=user_id)
+        conv = _make_mock_conv(
+            conv_id=existing_conv_id, workspace_id=mock_ws_row.id, user_id=user_id
+        )
         messages = [HumanMessage(content="prev"), AIMessage(content="ok")]
 
-        # Pre-populate cache
-        await cache.set(user_id, "ws", existing_conv_id, messages)
+        # Pre-populate cache using workspace UUID (not string)
+        await cache.set(user_id, mock_ws_row.id, existing_conv_id, messages)
 
         ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
         conv_repo = _mock_conv_repo(conv=conv)
@@ -450,7 +453,9 @@ class TestRunAgent:
     ):
         session = AsyncMock()
         existing_conv_id = uuid.uuid4()
-        conv = _make_mock_conv(conv_id=existing_conv_id, user_id=user_id)
+        conv = _make_mock_conv(
+            conv_id=existing_conv_id, workspace_id=mock_ws_row.id, user_id=user_id
+        )
         # No cache pre-population → should hit DB
         ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
         conv_repo = _mock_conv_repo(conv=conv)
@@ -487,7 +492,7 @@ class TestRunAgent:
         """If conv_id is given but doesn't belong to this user/workspace/agent → NotFoundError."""
         session = AsyncMock()
         ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
-        # get_conversation_for_agent returns None → not found
+        # get_conversation_for_workspace returns None → not found
         conv_repo = _mock_conv_repo(conv=None)
 
         with _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo), pytest.raises(NotFoundError):
@@ -499,7 +504,7 @@ class TestRunAgent:
         self, service, user_id, mock_ws_row, mock_agent_row, cache
     ):
         session = AsyncMock()
-        conv = _make_mock_conv(user_id=user_id)
+        conv = _make_mock_conv(workspace_id=mock_ws_row.id, user_id=user_id)
         ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
         conv_repo = _mock_conv_repo(conv=conv)
 
@@ -509,8 +514,8 @@ class TestRunAgent:
                 user_id, "ws", "Bot", "Hello", conversation_id=None, session=session
             )
 
-        # Cache should now contain the conversation
-        cached = await cache.get(user_id, "ws", conv_id)
+        # Cache should now contain the conversation (keyed by workspace UUID)
+        cached = await cache.get(user_id, mock_ws_row.id, conv_id)
         assert cached is not None
 
 
@@ -524,7 +529,7 @@ class TestStreamAgent:
         self, service, user_id, mock_ws_row, mock_agent_row
     ):
         session = AsyncMock()
-        conv = _make_mock_conv(user_id=user_id)
+        conv = _make_mock_conv(workspace_id=mock_ws_row.id, user_id=user_id)
         ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
         conv_repo = _mock_conv_repo(conv=conv)
 
@@ -564,18 +569,20 @@ class TestStreamAgent:
 
 
 class TestListConversations:
-    async def test_returns_views(self, service, user_id):
+    async def test_returns_views(self, service, user_id, mock_ws_row):
         session = MagicMock()
         conv_id = uuid.uuid4()
-        conv = _make_mock_conv(conv_id=conv_id, user_id=user_id)
+        conv = _make_mock_conv(conv_id=conv_id, workspace_id=mock_ws_row.id, user_id=user_id)
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row)
         conv_repo = _mock_conv_repo(conv=conv)
 
-        with _patch_conv_repo(conv_repo):
+        with _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo):
             views = await service.list_conversations(user_id, "ws", session=session)
 
         assert len(views) == 1
         assert isinstance(views[0], ConversationView)
         assert views[0].id == conv_id
+        assert views[0].workspace_id == mock_ws_row.id
 
     async def test_none_user_id_raises(self, service):
         session = MagicMock()
@@ -589,24 +596,26 @@ class TestListConversations:
 
 
 class TestDeleteConversation:
-    async def test_deletes_and_invalidates_cache(self, service, user_id, cache):
+    async def test_deletes_and_invalidates_cache(self, service, user_id, mock_ws_row, cache):
         session = AsyncMock()
         conv_id = uuid.uuid4()
-        conv = _make_mock_conv(conv_id=conv_id, user_id=user_id)
-        # Pre-populate cache
-        await cache.set(user_id, "ws", conv_id, [HumanMessage(content="hi")])
+        conv = _make_mock_conv(conv_id=conv_id, workspace_id=mock_ws_row.id, user_id=user_id)
+        # Pre-populate cache using workspace UUID
+        await cache.set(user_id, mock_ws_row.id, conv_id, [HumanMessage(content="hi")])
 
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row)
         conv_repo = _mock_conv_repo(conv=conv)
 
-        with _patch_conv_repo(conv_repo):
+        with _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo):
             await service.delete_conversation(user_id, "ws", conv_id, session=session)
 
         # Cache entry should be gone
-        assert await cache.get(user_id, "ws", conv_id) is None
+        assert await cache.get(user_id, mock_ws_row.id, conv_id) is None
 
-    async def test_not_found_raises(self, service, user_id):
+    async def test_not_found_raises(self, service, user_id, mock_ws_row):
         session = AsyncMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row)
         conv_repo = _mock_conv_repo(conv=None)
 
-        with _patch_conv_repo(conv_repo), pytest.raises(NotFoundError):
+        with _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo), pytest.raises(NotFoundError):
             await service.delete_conversation(user_id, "ws", uuid.uuid4(), session=session)

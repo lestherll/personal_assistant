@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr
 
+from personal_assistant.persistence.repository import AgentParticipationView
 from personal_assistant.services.views import (
     AgentView,
     ConversationView,
@@ -78,7 +79,8 @@ class WorkspaceDetailResponse(BaseModel):
 
 class ConversationResponse(BaseModel):
     id: uuid.UUID
-    workspace_name: str
+    workspace_id: uuid.UUID
+    user_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
 
@@ -86,9 +88,24 @@ class ConversationResponse(BaseModel):
     def from_view(cls, view: ConversationView) -> ConversationResponse:
         return cls(
             id=view.id,
-            workspace_name=view.workspace_name,
+            workspace_id=view.workspace_id,
+            user_id=view.user_id,
             created_at=view.created_at,
             updated_at=view.updated_at,
+        )
+
+
+class AgentParticipationResponse(BaseModel):
+    agent_id: uuid.UUID
+    agent_name: str
+    message_count: int
+
+    @classmethod
+    def from_view(cls, view: AgentParticipationView) -> AgentParticipationResponse:
+        return cls(
+            agent_id=view.agent_id,
+            agent_name=view.agent_name,
+            message_count=view.message_count,
         )
 
 

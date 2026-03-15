@@ -11,11 +11,15 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
 from personal_assistant.core.agent import Agent, AgentConfig, row_to_message
-from personal_assistant.persistence.repository import ConversationRepository
+from personal_assistant.persistence.repository import AgentParticipationView, ConversationRepository
 from personal_assistant.persistence.user_workspace_repository import UserWorkspaceRepository
 from personal_assistant.services.conversation_cache import ConversationCache
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
-from personal_assistant.services.views import AgentConfigView, AgentView, ConversationView
+from personal_assistant.services.views import (
+    AgentConfigView,
+    AgentView,
+    ConversationView,
+)
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -166,13 +170,18 @@ class AgentService:
         session: AsyncSession | None,
     ) -> tuple[str, uuid.UUID]:
         """Send a message to an agent and return ``(reply, conversation_id)``."""
-        agent, _ = await self._prepare_agent(
+        agent, ws_row = await self._prepare_agent(
             user_id, workspace_name, agent_name, conversation_id, session
         )
-        reply = await agent.run(message, session=session)
+        result = await agent.run(message, session=session)
         # Update cache with post-run history
-        await self._cache.set(user_id, workspace_name, agent.conversation_id, agent.history)  # type: ignore[arg-type]
-        return reply, agent.conversation_id  # type: ignore[return-value]
+        await self._cache.set(
+            user_id,  # type: ignore[arg-type]
+            ws_row.id,
+            agent.conversation_id,  # type: ignore[arg-type]
+            agent.history,
+        )
+        return result.content, agent.conversation_id  # type: ignore[return-value]
 
     async def stream_agent(
         self,
@@ -189,17 +198,23 @@ class AgentService:
         The conversation_id is resolved before any tokens are yielded so callers
         can surface errors as proper HTTP responses rather than SSE events.
         """
-        agent, _ = await self._prepare_agent(
+        agent, ws_row = await self._prepare_agent(
             user_id, workspace_name, agent_name, conversation_id, session
         )
         resolved_conv_id: uuid.UUID = agent.conversation_id  # type: ignore[assignment]
+        resolved_ws_id: uuid.UUID = ws_row.id
 
         async def _generate() -> AsyncIterator[str]:
             async for msg in agent.stream(message, session=session):
                 content = msg.content
                 yield content if isinstance(content, str) else str(content)
             # Update cache after stream completes
-            await self._cache.set(user_id, workspace_name, resolved_conv_id, agent.history)  # type: ignore[arg-type]
+            await self._cache.set(
+                user_id,  # type: ignore[arg-type]
+                resolved_ws_id,
+                resolved_conv_id,
+                agent.history,
+            )
 
         return _generate(), resolved_conv_id
 
@@ -213,17 +228,48 @@ class AgentService:
         if user_id is None:
             raise NotFoundError("workspace", workspace_name)
 
-        repo = ConversationRepository(session)
-        convs = await repo.list_conversations(workspace_name, user_id=user_id)
+        ws_repo = UserWorkspaceRepository(session)
+        ws_row = await ws_repo.get_workspace(user_id, workspace_name)
+        if ws_row is None:
+            raise NotFoundError("workspace", workspace_name)
+
+        conv_repo = ConversationRepository(session)
+        convs = await conv_repo.list_conversations(ws_row.id, user_id=user_id)
         return [
             ConversationView(
                 id=c.id,
-                workspace_name=c.workspace_name,
+                workspace_id=c.workspace_id,
+                user_id=c.user_id,
                 created_at=c.created_at,
                 updated_at=c.updated_at,
             )
             for c in convs
         ]
+
+    async def list_agent_participation(
+        self,
+        user_id: uuid.UUID | None,
+        workspace_name: str,
+        conversation_id: uuid.UUID,
+        session: AsyncSession,
+    ) -> list[AgentParticipationView]:
+        """Return agent participation breakdown for a conversation."""
+        if user_id is None:
+            raise NotFoundError("workspace", workspace_name)
+
+        ws_repo = UserWorkspaceRepository(session)
+        ws_row = await ws_repo.get_workspace(user_id, workspace_name)
+        if ws_row is None:
+            raise NotFoundError("workspace", workspace_name)
+
+        conv_repo = ConversationRepository(session)
+        conv = await conv_repo.get_conversation_for_workspace(
+            conversation_id, ws_row.id, user_id=user_id
+        )
+        if conv is None:
+            raise NotFoundError("conversation", str(conversation_id))
+
+        return await conv_repo.list_agent_participation(conversation_id)
 
     async def delete_conversation(
         self,
@@ -233,9 +279,17 @@ class AgentService:
         session: AsyncSession,
     ) -> None:
         """Delete a conversation and invalidate its cache entry."""
+        if user_id is None:
+            raise NotFoundError("conversation", str(conversation_id))
+
+        ws_repo = UserWorkspaceRepository(session)
+        ws_row = await ws_repo.get_workspace(user_id, workspace_name)
+        if ws_row is None:
+            raise NotFoundError("workspace", workspace_name)
+
         conv_repo = ConversationRepository(session)
         conv = await conv_repo.get_conversation_for_workspace(
-            conversation_id, workspace_name, user_id=user_id
+            conversation_id, ws_row.id, user_id=user_id
         )
         if conv is None:
             raise NotFoundError("conversation", str(conversation_id))
@@ -243,8 +297,7 @@ class AgentService:
         await session.delete(conv)
         await session.commit()
 
-        if user_id is not None:
-            await self._cache.invalidate(user_id, workspace_name, conversation_id)
+        await self._cache.invalidate(user_id, ws_row.id, conversation_id)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -278,8 +331,12 @@ class AgentService:
         agent_name: str,
         conversation_id: uuid.UUID | None,
         session: AsyncSession | None,
-    ) -> tuple[Agent, uuid.UUID | None]:
-        """Load config from DB, build an ephemeral Agent, bind conversation state."""
+    ) -> tuple[Agent, UserWorkspace]:
+        """Load config from DB, build an ephemeral Agent, bind conversation state.
+
+        Returns ``(agent, ws_row)`` so callers can access ``ws_row.id`` for
+        cache key construction without a second DB round-trip.
+        """
         if session is None or user_id is None:
             raise NotFoundError("workspace", workspace_name)
 
@@ -299,6 +356,7 @@ class AgentService:
             provider=agent_row.provider,
             model=agent_row.model,
             allowed_tools=list(agent_row.allowed_tools),
+            agent_id=agent_row.id,
         )
         agent = Agent(config, self._registry, tools=self._tools)
 
@@ -306,24 +364,24 @@ class AgentService:
 
         if conversation_id is not None:
             conv = await conv_repo.get_conversation_for_workspace(
-                conversation_id, workspace_name, user_id=user_id
+                conversation_id, ws_row.id, user_id=user_id
             )
             if conv is None:
                 raise NotFoundError("conversation", str(conversation_id))
 
-            cached = await self._cache.get(user_id, workspace_name, conversation_id)
+            cached = await self._cache.get(user_id, ws_row.id, conversation_id)
             if cached is not None:
                 history = cached
             else:
                 rows = await conv_repo.load_messages(conversation_id)
                 history = [row_to_message(r) for r in rows]
-                await self._cache.set(user_id, workspace_name, conversation_id, history)
+                await self._cache.set(user_id, ws_row.id, conversation_id, history)
 
             agent.restore(history, conversation_id)
         else:
-            await agent.start_conversation(session, workspace_name, user_id=user_id)
+            await agent.start_conversation(session, ws_row.id, user_id=user_id)
 
-        return agent, agent.conversation_id
+        return agent, ws_row
 
     def _row_to_view(self, row: UserAgent) -> AgentView:
         allowed = set(row.allowed_tools)
