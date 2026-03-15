@@ -9,6 +9,14 @@ which asyncio event loop the test is currently running.
 
 from __future__ import annotations
 
+import os
+
+# deepeval's pytest plugin loads .env at import time (before conftest runs), which can set
+# AUTH_DISABLED=false from the project's .env file.  When no DATABASE_URL is configured
+# the app requires AUTH_DISABLED=true to start, so we enforce it here for tests.
+if not os.environ.get("DATABASE_URL"):
+    os.environ["AUTH_DISABLED"] = "true"
+
 import socket
 import threading
 from collections.abc import AsyncIterator
