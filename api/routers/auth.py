@@ -2,20 +2,22 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_db_session
+from api.dependencies import get_db_session, get_orchestrator
 from api.schemas import (
-    LoginRequest,
     RefreshRequest,
     RegisterRequest,
     RegisterResponse,
     TokenResponse,
     UserResponse,
 )
+from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.persistence.user_repository import UserRepository
-from personal_assistant.services.auth_service import AuthService
+from personal_assistant.persistence.user_workspace_repository import UserWorkspaceRepository
+from personal_assistant.services.auth_service import AuthService, fork_default_workspace
 from personal_assistant.services.exceptions import ServiceValidationError
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -30,13 +32,23 @@ def _require_session(session: AsyncSession | None) -> AsyncSession:
 
 
 @router.post("/register", response_model=RegisterResponse, status_code=status.HTTP_201_CREATED)
-async def register(body: RegisterRequest, session: DbSessionDep) -> RegisterResponse:
+async def register(
+    body: RegisterRequest,
+    request: Request,
+    session: DbSessionDep,
+) -> RegisterResponse:
     db = _require_session(session)
     service = AuthService(UserRepository(db))
     user, access_token, refresh_token = await service.register(
         username=body.username,
         email=body.email,
         password=body.password,
+    )
+    orchestrator: Orchestrator = get_orchestrator(request)
+    await fork_default_workspace(
+        user_id=user.id,
+        default_orchestrator=orchestrator,
+        user_workspace_repo=UserWorkspaceRepository(db),
     )
     return RegisterResponse(
         user=UserResponse(
@@ -50,11 +62,13 @@ async def register(body: RegisterRequest, session: DbSessionDep) -> RegisterResp
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(body: LoginRequest, session: DbSessionDep) -> TokenResponse:
+async def login(
+    form: Annotated[OAuth2PasswordRequestForm, Depends()], session: DbSessionDep
+) -> TokenResponse:
     db = _require_session(session)
     service = AuthService(UserRepository(db))
     _, access_token, refresh_token = await service.login(
-        username=body.username, password=body.password
+        username=form.username, password=form.password
     )
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 

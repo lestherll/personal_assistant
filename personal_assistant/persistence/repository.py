@@ -21,12 +21,11 @@ class ConversationRepository:
 
     async def create_conversation(
         self,
-        agent_name: str,
-        workspace_name: str | None = None,
+        workspace_name: str,
         user_id: uuid.UUID | None = None,
     ) -> Conversation:
         """Insert a new conversation row and return it."""
-        conv = Conversation(agent_name=agent_name, workspace_name=workspace_name, user_id=user_id)
+        conv = Conversation(workspace_name=workspace_name, user_id=user_id)
         self._session.add(conv)
         await self._session.commit()
         await self._session.refresh(conv)
@@ -61,17 +60,15 @@ class ConversationRepository:
         )
         return list(result.scalars().all())
 
-    async def get_conversation_for_agent(
+    async def get_conversation_for_workspace(
         self,
         conversation_id: uuid.UUID,
-        agent_name: str,
         workspace_name: str,
         user_id: uuid.UUID | None = None,
     ) -> Conversation | None:
-        """Return the conversation only if it belongs to the given agent and workspace."""
+        """Return the conversation only if it belongs to the given workspace (and user)."""
         conditions = [
             Conversation.id == conversation_id,
-            Conversation.agent_name == agent_name,
             Conversation.workspace_name == workspace_name,
         ]
         if user_id is not None:
@@ -81,15 +78,11 @@ class ConversationRepository:
 
     async def list_conversations(
         self,
-        agent_name: str,
         workspace_name: str,
         user_id: uuid.UUID | None = None,
     ) -> list[Conversation]:
-        """Return all conversations for a given agent and workspace, ordered by creation time."""
-        conditions = [
-            Conversation.agent_name == agent_name,
-            Conversation.workspace_name == workspace_name,
-        ]
+        """Return all conversations for a workspace, ordered by creation time."""
+        conditions = [Conversation.workspace_name == workspace_name]
         if user_id is not None:
             conditions.append(Conversation.user_id == user_id)
         result = await self._session.execute(

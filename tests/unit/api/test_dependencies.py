@@ -1,71 +1,23 @@
-"""Unit tests for api.dependencies.
-
-The dependency functions are plain callables — we test them directly without
-starting a server or going through FastAPI's DI machinery.
-"""
+"""Unit tests for api.dependencies."""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock
 
 from api.dependencies import (
+    DEV_USER,
     get_agent_service,
-    get_conversation_pool,
-    get_conversation_service,
-    get_orchestrator,
     get_workspace_service,
 )
-from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.services.agent_service import AgentService
-from personal_assistant.services.conversation_pool import ConversationPool
-from personal_assistant.services.conversation_service import ConversationService
 from personal_assistant.services.workspace_service import WorkspaceService
 
 
-def _make_request(orchestrator: Orchestrator, pool: ConversationPool | None = None) -> MagicMock:
-    """Return a minimal mock Request with required app.state attributes set."""
+def _make_request(agent_service=None, workspace_service=None) -> MagicMock:
     request = MagicMock()
-    request.app.state.orchestrator = orchestrator
-    request.app.state.conversation_pool = pool or ConversationPool()
+    request.app.state.agent_service = agent_service or MagicMock(spec=AgentService)
+    request.app.state.workspace_service = workspace_service or MagicMock(spec=WorkspaceService)
     return request
-
-
-# ---------------------------------------------------------------------------
-# get_orchestrator
-# ---------------------------------------------------------------------------
-
-
-def test_get_orchestrator_returns_instance_from_app_state(mock_registry):
-    orchestrator = Orchestrator(mock_registry)
-    request = _make_request(orchestrator)
-
-    result = get_orchestrator(request)
-
-    assert result is orchestrator
-
-
-def test_get_orchestrator_identity_is_preserved(mock_registry):
-    """Two requests sharing the same app.state return the same object."""
-    orchestrator = Orchestrator(mock_registry)
-    request_a = _make_request(orchestrator)
-    request_b = _make_request(orchestrator)
-
-    assert get_orchestrator(request_a) is get_orchestrator(request_b)
-
-
-# ---------------------------------------------------------------------------
-# get_conversation_pool
-# ---------------------------------------------------------------------------
-
-
-def test_get_conversation_pool_returns_pool_from_app_state(mock_registry):
-    orchestrator = Orchestrator(mock_registry)
-    pool = ConversationPool(max_size=50)
-    request = _make_request(orchestrator, pool)
-
-    result = get_conversation_pool(request)
-
-    assert result is pool
 
 
 # ---------------------------------------------------------------------------
@@ -73,47 +25,18 @@ def test_get_conversation_pool_returns_pool_from_app_state(mock_registry):
 # ---------------------------------------------------------------------------
 
 
-def test_get_workspace_service_returns_workspace_service(mock_registry):
-    orchestrator = Orchestrator(mock_registry)
-    pool = ConversationPool()
-    conv_service = ConversationService(orchestrator, pool)
-
-    service = get_workspace_service(orchestrator, conv_service)
-
-    assert isinstance(service, WorkspaceService)
+def test_get_workspace_service_returns_singleton_from_app_state():
+    svc = MagicMock(spec=WorkspaceService)
+    request = _make_request(workspace_service=svc)
+    result = get_workspace_service(request)
+    assert result is svc
 
 
-def test_get_workspace_service_wraps_given_orchestrator(mock_registry):
-    orchestrator = Orchestrator(mock_registry)
-    pool = ConversationPool()
-    conv_service = ConversationService(orchestrator, pool)
-
-    service = get_workspace_service(orchestrator, conv_service)
-
-    assert service._orchestrator is orchestrator
-
-
-# ---------------------------------------------------------------------------
-# get_conversation_service
-# ---------------------------------------------------------------------------
-
-
-def test_get_conversation_service_returns_conversation_service(mock_registry):
-    orchestrator = Orchestrator(mock_registry)
-    pool = ConversationPool()
-
-    service = get_conversation_service(orchestrator, pool)
-
-    assert isinstance(service, ConversationService)
-
-
-def test_get_conversation_service_uses_given_pool(mock_registry):
-    orchestrator = Orchestrator(mock_registry)
-    pool = ConversationPool()
-
-    service = get_conversation_service(orchestrator, pool)
-
-    assert service._pool is pool
+def test_get_workspace_service_identity_is_preserved():
+    svc = MagicMock(spec=WorkspaceService)
+    request_a = _make_request(workspace_service=svc)
+    request_b = _make_request(workspace_service=svc)
+    assert get_workspace_service(request_a) is get_workspace_service(request_b)
 
 
 # ---------------------------------------------------------------------------
@@ -121,21 +44,26 @@ def test_get_conversation_service_uses_given_pool(mock_registry):
 # ---------------------------------------------------------------------------
 
 
-def test_get_agent_service_returns_agent_service(mock_registry):
-    orchestrator = Orchestrator(mock_registry)
-    pool = ConversationPool()
-    conv_service = ConversationService(orchestrator, pool)
-
-    service = get_agent_service(orchestrator, conv_service)
-
-    assert isinstance(service, AgentService)
+def test_get_agent_service_returns_singleton_from_app_state():
+    svc = MagicMock(spec=AgentService)
+    request = _make_request(agent_service=svc)
+    result = get_agent_service(request)
+    assert result is svc
 
 
-def test_get_agent_service_wraps_given_orchestrator(mock_registry):
-    orchestrator = Orchestrator(mock_registry)
-    pool = ConversationPool()
-    conv_service = ConversationService(orchestrator, pool)
+def test_get_agent_service_identity_is_preserved():
+    svc = MagicMock(spec=AgentService)
+    request_a = _make_request(agent_service=svc)
+    request_b = _make_request(agent_service=svc)
+    assert get_agent_service(request_a) is get_agent_service(request_b)
 
-    service = get_agent_service(orchestrator, conv_service)
 
-    assert service._orchestrator is orchestrator
+# ---------------------------------------------------------------------------
+# DEV_USER sentinel
+# ---------------------------------------------------------------------------
+
+
+def test_dev_user_has_zero_uuid():
+    import uuid
+
+    assert DEV_USER.id == uuid.UUID(int=0)

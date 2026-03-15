@@ -102,13 +102,12 @@ class UserAgent(Base):
 
 
 class Conversation(Base):
-    """Represents a single conversation session between a user and an agent."""
+    """Represents a single conversation session within a user's workspace."""
 
     __tablename__ = "conversations"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    agent_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    workspace_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    workspace_name: Mapped[str] = mapped_column(String(255), nullable=False)
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -130,7 +129,7 @@ class Conversation(Base):
     )
 
     def __repr__(self) -> str:
-        return f"Conversation(id={self.id!s}, agent={self.agent_name!r})"
+        return f"Conversation(id={self.id!s}, workspace={self.workspace_name!r})"
 
 
 class Message(Base):

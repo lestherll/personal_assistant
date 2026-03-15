@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated, Any, NotRequired
 
 from langchain_core.language_models import BaseChatModel
@@ -16,6 +17,40 @@ from personal_assistant.core.agent import Agent
 
 if TYPE_CHECKING:
     pass
+
+
+@dataclass
+class AgentInfo:
+    """Lightweight agent descriptor used by the stateless router."""
+
+    name: str
+    description: str
+
+
+async def route(message: str, agents: list[AgentInfo], llm: BaseChatModel) -> str:
+    """Return the name of the best agent to handle *message*.
+
+    Makes a single structured LLM call — no LangGraph graph, no checkpointer.
+    Falls back to the first agent if the LLM returns an unexpected value.
+    """
+    agent_descriptions = "\n".join(f"- {a.name}: {a.description}" for a in agents)
+    valid_names = [a.name for a in agents]
+
+    class _Decision(BaseModel):
+        next_agent: str
+
+    router_llm = llm.with_structured_output(_Decision)
+    system = SystemMessage(
+        content=(
+            "You are a routing supervisor. Pick the most suitable agent for the "
+            "user's request.\n\n"
+            f"Available agents:\n{agent_descriptions}\n\n"
+            f"Respond with exactly one agent name from: {', '.join(valid_names)}."
+        )
+    )
+    result = await router_llm.ainvoke([system, HumanMessage(content=message)])
+    chosen: str = getattr(result, "next_agent", "")
+    return chosen if chosen in valid_names else valid_names[0]
 
 
 class _RouterDecision(BaseModel):

@@ -4,7 +4,7 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, status
+from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,7 +15,6 @@ from personal_assistant.services.agent_service import AgentService
 from personal_assistant.services.schemas import (
     ChatRequest,
     CreateAgentRequest,
-    ResetRequest,
     UpdateAgentRequest,
 )
 
@@ -25,16 +24,19 @@ router = APIRouter(
 )
 
 AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
+DbSessionDep = Annotated[AsyncSession | None, Depends(get_db_session)]
 
 
 @router.post("/", response_model=AgentResponse, status_code=status.HTTP_201_CREATED)
-def create_agent(
+async def create_agent(
     workspace_name: WorkspaceName,
     body: CreateAgentRequest,
     service: AgentServiceDep,
-    _user: CurrentUserDep,
+    db: DbSessionDep,
+    current_user: CurrentUserDep,
 ) -> AgentResponse:
-    view = service.create_agent(
+    view = await service.create_agent(
+        current_user.id,
         workspace_name=workspace_name,
         name=body.name,
         description=body.description,
@@ -42,37 +44,45 @@ def create_agent(
         provider=body.provider,
         model=body.model,
         allowed_tools=body.allowed_tools,
+        session=db,
     )
     return AgentResponse.from_view(view)
 
 
 @router.get("/", response_model=list[AgentResponse])
-def list_agents(
-    workspace_name: WorkspaceName, service: AgentServiceDep, _user: CurrentUserDep
+async def list_agents(
+    workspace_name: WorkspaceName,
+    service: AgentServiceDep,
+    db: DbSessionDep,
+    current_user: CurrentUserDep,
 ) -> list[AgentResponse]:
-    return [AgentResponse.from_view(v) for v in service.list_agents(workspace_name)]
+    views = await service.list_agents(current_user.id, workspace_name, session=db)
+    return [AgentResponse.from_view(v) for v in views]
 
 
 @router.get("/{agent_name}", response_model=AgentResponse)
-def get_agent(
+async def get_agent(
     workspace_name: WorkspaceName,
     agent_name: AgentName,
     service: AgentServiceDep,
-    _user: CurrentUserDep,
+    db: DbSessionDep,
+    current_user: CurrentUserDep,
 ) -> AgentResponse:
-    view = service.get_agent(workspace_name, agent_name)
+    view = await service.get_agent(current_user.id, workspace_name, agent_name, session=db)
     return AgentResponse.from_view(view)
 
 
 @router.patch("/{agent_name}", response_model=AgentResponse)
-def update_agent(
+async def update_agent(
     workspace_name: WorkspaceName,
     agent_name: AgentName,
     body: UpdateAgentRequest,
     service: AgentServiceDep,
-    _user: CurrentUserDep,
+    db: DbSessionDep,
+    current_user: CurrentUserDep,
 ) -> AgentResponse:
-    view = service.update_agent(
+    view = await service.update_agent(
+        current_user.id,
         workspace_name,
         agent_name,
         description=body.description,
@@ -80,21 +90,20 @@ def update_agent(
         provider=body.provider,
         model=body.model,
         allowed_tools=body.allowed_tools,
+        session=db,
     )
     return AgentResponse.from_view(view)
 
 
 @router.delete("/{agent_name}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_agent(
+async def delete_agent(
     workspace_name: WorkspaceName,
     agent_name: AgentName,
     service: AgentServiceDep,
-    _user: CurrentUserDep,
+    db: DbSessionDep,
+    current_user: CurrentUserDep,
 ) -> None:
-    service.delete_agent(workspace_name, agent_name)
-
-
-DbSessionDep = Annotated[AsyncSession | None, Depends(get_db_session)]
+    await service.delete_agent(current_user.id, workspace_name, agent_name, session=db)
 
 
 @router.post("/{agent_name}/chat", response_model=ChatResponse)
@@ -104,9 +113,10 @@ async def chat(
     body: ChatRequest,
     service: AgentServiceDep,
     db: DbSessionDep,
-    _user: CurrentUserDep,
+    current_user: CurrentUserDep,
 ) -> ChatResponse:
     reply, conv_id = await service.run_agent(
+        current_user.id,
         workspace_name,
         agent_name,
         body.message,
@@ -123,10 +133,10 @@ async def chat_stream(
     body: ChatRequest,
     service: AgentServiceDep,
     db: DbSessionDep,
-    _user: CurrentUserDep,
+    current_user: CurrentUserDep,
 ) -> StreamingResponse:
-    # Resolve conversation_id before streaming so errors become proper HTTP responses.
     tokens, conv_id = await service.stream_agent(
+        current_user.id,
         workspace_name,
         agent_name,
         body.message,
@@ -146,29 +156,17 @@ async def chat_stream(
     )
 
 
-@router.post("/{agent_name}/reset", status_code=status.HTTP_204_NO_CONTENT)
-def reset_agent(
-    workspace_name: WorkspaceName,
-    agent_name: AgentName,
-    service: AgentServiceDep,
-    _user: CurrentUserDep,
-    body: ResetRequest | None = Body(default=None),
-) -> None:
-    conv_id = body.conversation_id if body is not None else None
-    service.reset_agent(workspace_name, agent_name, conversation_id=conv_id)
-
-
 @router.get("/{agent_name}/conversations", response_model=list[ConversationResponse])
 async def list_conversations(
     workspace_name: WorkspaceName,
     agent_name: AgentName,
     service: AgentServiceDep,
     db: DbSessionDep,
-    _user: CurrentUserDep,
+    current_user: CurrentUserDep,
 ) -> list[ConversationResponse]:
     if db is None:
         return []
-    views = await service.list_conversations(workspace_name, agent_name, db)
+    views = await service.list_conversations(current_user.id, workspace_name, db)
     return [ConversationResponse.from_view(v) for v in views]
 
 
@@ -182,10 +180,10 @@ async def delete_conversation(
     conversation_id: uuid.UUID,
     service: AgentServiceDep,
     db: DbSessionDep,
-    _user: CurrentUserDep,
+    current_user: CurrentUserDep,
 ) -> None:
     if db is None:
         from personal_assistant.services.exceptions import NotFoundError
 
         raise NotFoundError("conversation", str(conversation_id))
-    await service.delete_conversation(workspace_name, agent_name, conversation_id, db)
+    await service.delete_conversation(current_user.id, workspace_name, conversation_id, db)

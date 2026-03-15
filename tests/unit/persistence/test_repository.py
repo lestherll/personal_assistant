@@ -56,23 +56,23 @@ def repo(mock_session: AsyncMock) -> ConversationRepository:
 
 class TestCreateConversation:
     async def test_adds_and_commits_and_refreshes(self, repo, mock_session):
-        await repo.create_conversation("Agent1", "workspace1")
+        await repo.create_conversation("workspace1")
         mock_session.add.assert_called_once()
         mock_session.commit.assert_awaited_once()
         mock_session.refresh.assert_awaited_once()
 
     async def test_returns_conversation(self, repo, mock_session):
         # refresh doesn't modify the object, so we can check the add call
-        await repo.create_conversation("Agent1")
+        await repo.create_conversation("workspace1")
         mock_session.add.assert_called_once()
         added = mock_session.add.call_args[0][0]
         assert isinstance(added, Conversation)
-        assert added.agent_name == "Agent1"
+        assert added.workspace_name == "workspace1"
 
 
 class TestGetConversation:
     async def test_returns_conversation_when_found(self, repo, mock_session):
-        conv = Conversation(agent_name="Agent1")
+        conv = Conversation(workspace_name="ws1")
         mock_session.execute.return_value = _scalar_result(conv)
         result = await repo.get_conversation(uuid.uuid4())
         assert result is conv
@@ -85,7 +85,7 @@ class TestGetConversation:
 
 class TestTouchConversation:
     async def test_updates_updated_at_when_found(self, repo, mock_session):
-        conv = Conversation(agent_name="Agent1")
+        conv = Conversation(workspace_name="ws1")
         conv.updated_at = None  # type: ignore[assignment]
         mock_session.execute.return_value = _scalar_result(conv)
         await repo.touch_conversation(uuid.uuid4())
@@ -113,16 +113,16 @@ class TestLoadMessages:
         assert result == []
 
 
-class TestGetConversationForAgent:
+class TestGetConversationForWorkspace:
     async def test_returns_conversation_on_match(self, repo, mock_session):
-        conv = Conversation(agent_name="Agent1", workspace_name="ws1")
+        conv = Conversation(workspace_name="ws1")
         mock_session.execute.return_value = _scalar_result(conv)
-        result = await repo.get_conversation_for_agent(uuid.uuid4(), "Agent1", "ws1")
+        result = await repo.get_conversation_for_workspace(uuid.uuid4(), "ws1")
         assert result is conv
 
     async def test_returns_none_on_mismatch(self, repo, mock_session):
         mock_session.execute.return_value = _scalar_result(None)
-        result = await repo.get_conversation_for_agent(uuid.uuid4(), "Agent1", "ws1")
+        result = await repo.get_conversation_for_workspace(uuid.uuid4(), "ws1")
         assert result is None
 
 
@@ -144,20 +144,20 @@ class TestSaveMessage:
 
 class TestListConversations:
     async def test_returns_conversations(self, repo, mock_session):
-        conv = Conversation(agent_name="Agent1", workspace_name="ws1")
+        conv = Conversation(workspace_name="ws1")
         mock_session.execute.return_value = _scalars_all_result([conv])
-        result = await repo.list_conversations("Agent1", "ws1")
+        result = await repo.list_conversations("ws1")
         assert result == [conv]
 
     async def test_returns_empty_when_none(self, repo, mock_session):
         mock_session.execute.return_value = _scalars_all_result([])
-        result = await repo.list_conversations("Agent1", "ws1")
+        result = await repo.list_conversations("ws1")
         assert result == []
 
 
 class TestDeleteConversation:
     async def test_deletes_and_returns_true(self, repo, mock_session):
-        conv = Conversation(agent_name="Agent1")
+        conv = Conversation(workspace_name="ws1")
         mock_session.execute.return_value = _scalar_result(conv)
         mock_session.delete = AsyncMock()
         result = await repo.delete_conversation(uuid.uuid4())

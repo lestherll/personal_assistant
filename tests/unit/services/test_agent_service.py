@@ -1,322 +1,548 @@
+"""Tests for the new DB-first, stateless AgentService."""
+
+from __future__ import annotations
+
 import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from langchain_core.messages import AIMessage, HumanMessage
 
-from personal_assistant.core.orchestrator import Orchestrator
-from personal_assistant.services.agent_service import AgentService
-from personal_assistant.services.conversation_pool import ConversationPool
-from personal_assistant.services.conversation_service import ConversationService
+from personal_assistant.services.conversation_cache import InMemoryConversationCache
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
 from personal_assistant.services.views import AgentView, ConversationView
 from tests.unit.conftest import make_mock_graph, make_mock_provider
 
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
 
 @pytest.fixture
-def orchestrator():
+def user_id():
+    return uuid.UUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+
+
+@pytest.fixture
+def registry():
     from personal_assistant.providers.registry import ProviderRegistry
 
-    registry = ProviderRegistry()
-    registry.register(make_mock_provider("mock"), default=True)
-    return Orchestrator(registry)
+    reg = ProviderRegistry()
+    reg.register(make_mock_provider("mock"), default=True)
+    return reg
 
 
 @pytest.fixture
-def service(orchestrator):
-    pool = ConversationPool()
-    conv_service = ConversationService(orchestrator, pool)
-    return AgentService(orchestrator, conv_service)
+def cache():
+    return InMemoryConversationCache(max_size=32)
 
 
 @pytest.fixture
-def workspace(orchestrator):
-    from personal_assistant.core.workspace import WorkspaceConfig
+def service(registry, cache):
+    from personal_assistant.services.agent_service import AgentService
 
-    return orchestrator.create_workspace(WorkspaceConfig(name="ws", description="test ws"))
-
-
-def _create_agent(service, workspace_name="ws", name="Bot", system_prompt="Be helpful."):
-    """Create an agent in the service. The patch must remain active for clone() calls."""
-    mock = make_mock_graph()
-    with patch("personal_assistant.core.agent.create_agent", return_value=mock):
-        return service.create_agent(
-            workspace_name,
-            name=name,
-            description="A test bot",
-            system_prompt=system_prompt,
-        )
+    return AgentService(registry, tools=[], cache=cache)
 
 
-def _make_graph_patcher():
-    """Return a context manager that patches create_agent for the duration of a run."""
-    mock = make_mock_graph()
-    return patch("personal_assistant.core.agent.create_agent", return_value=mock), mock
+@pytest.fixture
+def mock_ws_row(user_id):
+    """Fake UserWorkspace ORM row."""
+    row = MagicMock()
+    row.id = uuid.uuid4()
+    row.user_id = user_id
+    row.name = "ws"
+    row.description = "test ws"
+    return row
 
 
-class TestCreateAgent:
-    def test_creates_and_returns_view(self, service, workspace):
-        view = _create_agent(service)
-        assert isinstance(view, AgentView)
-        assert view.config.name == "Bot"
-        assert view.config.system_prompt == "Be helpful."
-
-    def test_includes_llm_info(self, service, workspace):
-        view = _create_agent(service)
-        assert "source" in view.llm_info
-
-    def test_unknown_workspace_raises(self, service):
-        with pytest.raises(NotFoundError):
-            _create_agent(service, workspace_name="ghost")
-
-    def test_duplicate_agent_name_raises(self, service, workspace):
-        _create_agent(service)
-        with pytest.raises(AlreadyExistsError):
-            _create_agent(service)
+@pytest.fixture
+def mock_agent_row(mock_ws_row):
+    """Fake UserAgent ORM row."""
+    row = MagicMock()
+    row.id = uuid.uuid4()
+    row.user_workspace_id = mock_ws_row.id
+    row.name = "Bot"
+    row.description = "A bot"
+    row.system_prompt = "Be helpful."
+    row.provider = None
+    row.model = None
+    row.allowed_tools = []
+    return row
 
 
-class TestListAgents:
-    def test_empty_workspace(self, service, workspace):
-        assert service.list_agents("ws") == []
-
-    def test_returns_all_agents(self, service, workspace):
-        _create_agent(service, name="Alpha")
-        _create_agent(service, name="Beta")
-        views = service.list_agents("ws")
-        names = [v.config.name for v in views]
-        assert set(names) == {"Alpha", "Beta"}
-
-    def test_unknown_workspace_raises(self, service):
-        with pytest.raises(NotFoundError):
-            service.list_agents("ghost")
-
-
-class TestGetAgent:
-    def test_returns_view(self, service, workspace):
-        _create_agent(service)
-        view = service.get_agent("ws", "Bot")
-        assert view.config.name == "Bot"
-
-    def test_unknown_workspace_raises(self, service):
-        with pytest.raises(NotFoundError):
-            service.get_agent("ghost", "Bot")
-
-    def test_unknown_agent_raises(self, service, workspace):
-        with pytest.raises(NotFoundError):
-            service.get_agent("ws", "ghost")
+def _mock_ws_repo(ws_row=None, agent_row=None, agent_rows=None):
+    """Build a mocked UserWorkspaceRepository."""
+    repo = MagicMock()
+    repo.get_workspace = AsyncMock(return_value=ws_row)
+    repo.list_workspaces = AsyncMock(return_value=[ws_row] if ws_row else [])
+    repo.create_workspace = AsyncMock(return_value=ws_row)
+    repo.upsert_workspace = AsyncMock(return_value=ws_row)
+    repo.delete_workspace = AsyncMock(return_value=True)
+    repo.get_agent = AsyncMock(return_value=agent_row)
+    repo.list_agents = AsyncMock(return_value=agent_rows or ([agent_row] if agent_row else []))
+    repo.create_agent = AsyncMock(return_value=agent_row)
+    repo.upsert_agent = AsyncMock(return_value=agent_row)
+    repo.delete_agent = AsyncMock(return_value=True)
+    return repo
 
 
-class TestUpdateAgent:
-    def test_updates_system_prompt(self, service, workspace):
-        _create_agent(service)
-        mock = make_mock_graph()
-        with patch("personal_assistant.core.agent.create_agent", return_value=mock):
-            view = service.update_agent("ws", "Bot", system_prompt="New prompt.")
-        assert view.config.system_prompt == "New prompt."
-
-    def test_partial_update_preserves_other_fields(self, service, workspace):
-        _create_agent(service, system_prompt="Original.")
-        mock = make_mock_graph()
-        with patch("personal_assistant.core.agent.create_agent", return_value=mock):
-            view = service.update_agent("ws", "Bot", description="Updated desc")
-        assert view.config.description == "Updated desc"
-        assert view.config.system_prompt == "Original."
-
-    def test_unknown_workspace_raises(self, service):
-        with pytest.raises(NotFoundError):
-            service.update_agent("ghost", "Bot", description="x")
-
-    def test_unknown_agent_raises(self, service, workspace):
-        with pytest.raises(NotFoundError):
-            service.update_agent("ws", "ghost", description="x")
+def _mock_conv_repo(conv=None, messages=None, deleted=True):
+    """Build a mocked ConversationRepository."""
+    repo = MagicMock()
+    repo.get_conversation = AsyncMock(return_value=conv)
+    repo.get_conversation_for_workspace = AsyncMock(return_value=conv)
+    repo.create_conversation = AsyncMock(return_value=conv)
+    repo.load_messages = AsyncMock(return_value=messages or [])
+    repo.save_message = AsyncMock()
+    repo.touch_conversation = AsyncMock()
+    repo.delete_conversation = AsyncMock(return_value=deleted)
+    repo.list_conversations = AsyncMock(return_value=[conv] if conv else [])
+    return repo
 
 
-class TestDeleteAgent:
-    def test_removes_agent(self, service, workspace, orchestrator):
-        _create_agent(service)
-        service.delete_agent("ws", "Bot")
-        ws = orchestrator.get_workspace("ws")
-        assert ws is not None
-        assert ws.get_agent("Bot") is None
-
-    def test_unknown_workspace_raises(self, service):
-        with pytest.raises(NotFoundError):
-            service.delete_agent("ghost", "Bot")
-
-    def test_unknown_agent_raises(self, service, workspace):
-        with pytest.raises(NotFoundError):
-            service.delete_agent("ws", "ghost")
-
-
-class TestRunAgent:
-    async def test_returns_reply_and_conversation_id(self, service, workspace):
-        import uuid
-
-        patcher, _ = _make_graph_patcher()
-        with patcher:
-            _create_agent(service)
-            reply, conv_id = await service.run_agent(
-                "ws", "Bot", "Hello", conversation_id=None, session=None
-            )
-        assert isinstance(reply, str)
-        assert reply == "Test response"
-        assert isinstance(conv_id, uuid.UUID)
-
-    async def test_unknown_workspace_raises(self, service):
-        with pytest.raises(NotFoundError):
-            await service.run_agent("ghost", "Bot", "Hello", conversation_id=None, session=None)
-
-    async def test_unknown_agent_raises(self, service, workspace):
-        with pytest.raises(NotFoundError):
-            await service.run_agent("ws", "ghost", "Hello", conversation_id=None, session=None)
-
-    async def test_template_history_stays_empty(self, service, workspace):
-        """Template agents must not accumulate history — clones do."""
-        patcher, _ = _make_graph_patcher()
-        with patcher:
-            _create_agent(service)
-            await service.run_agent("ws", "Bot", "Hello", conversation_id=None, session=None)
-        ws_obj = service._orchestrator.get_workspace("ws")
-        assert ws_obj is not None
-        template = ws_obj.get_agent("Bot")
-        assert template is not None
-        assert template.history == []
-
-
-class TestStreamAgent:
-    async def test_returns_iterator_and_conversation_id(self, service, workspace):
-        import uuid
-
-        patcher, _ = _make_graph_patcher()
-        with patcher:
-            _create_agent(service)
-            tokens, conv_id = await service.stream_agent(
-                "ws", "Bot", "Hello", conversation_id=None, session=None
-            )
-            assert isinstance(conv_id, uuid.UUID)
-            chunks = [c async for c in tokens]
-        assert len(chunks) > 0
-        assert all(isinstance(c, str) for c in chunks)
-
-    async def test_unknown_workspace_raises(self, service):
-        with pytest.raises(NotFoundError):
-            await service.stream_agent("ghost", "Bot", "Hello", conversation_id=None, session=None)
-
-    async def test_unknown_agent_raises(self, service, workspace):
-        with pytest.raises(NotFoundError):
-            await service.stream_agent("ws", "ghost", "Hello", conversation_id=None, session=None)
-
-
-class TestResetAgent:
-    def test_resets_template_when_no_conversation_id(self, service, workspace):
-        _create_agent(service)
-        # Should complete without error; template history is already empty
-        service.reset_agent("ws", "Bot")
-        ws_obj = service._orchestrator.get_workspace("ws")
-        assert ws_obj is not None
-        assert ws_obj.get_agent("Bot") is not None
-
-    async def test_evicts_clone_when_conversation_id_given(self, service, workspace):
-        patcher, _ = _make_graph_patcher()
-        with patcher:
-            _create_agent(service)
-            _, conv_id = await service.run_agent(
-                "ws", "Bot", "Hello", conversation_id=None, session=None
-            )
-        # Clone should be in pool
-        pool = service._conversation_service._pool
-        assert pool.get("ws", "Bot", conv_id) is not None
-
-        service.reset_agent("ws", "Bot", conversation_id=conv_id)
-        # Clone should be evicted
-        assert pool.get("ws", "Bot", conv_id) is None
-
-    def test_unknown_workspace_raises(self, service):
-        with pytest.raises(NotFoundError):
-            service.reset_agent("ghost", "Bot")
-
-    def test_unknown_agent_raises(self, service, workspace):
-        with pytest.raises(NotFoundError):
-            service.reset_agent("ws", "ghost")
-
-
-def _make_mock_conversation(conv_id: uuid.UUID | None = None) -> MagicMock:
+def _make_mock_conv(conv_id=None, workspace_name="ws", user_id=None):
     conv = MagicMock()
     conv.id = conv_id or uuid.uuid4()
-    conv.agent_name = "Bot"
-    conv.workspace_name = "ws"
+    conv.workspace_name = workspace_name
+    conv.user_id = user_id
     conv.created_at = datetime.now(UTC)
     conv.updated_at = datetime.now(UTC)
     return conv
 
 
-class TestListConversations:
-    async def test_returns_conversation_views(self, service, workspace) -> None:
-        _create_agent(service)
-        conv_id = uuid.uuid4()
-        mock_session = MagicMock()
-        mock_repo = MagicMock()
-        mock_repo.list_conversations = AsyncMock(return_value=[_make_mock_conversation(conv_id)])
+def _make_mock_graph(response: str = "Test response") -> MagicMock:
+    return make_mock_graph(response)
 
-        with patch(
-            "personal_assistant.persistence.repository.ConversationRepository",
-            return_value=mock_repo,
-        ):
-            views = await service.list_conversations("ws", "Bot", mock_session)
+
+def _patch_ws_repo(ws_repo):
+    return patch(
+        "personal_assistant.services.agent_service.UserWorkspaceRepository",
+        return_value=ws_repo,
+    )
+
+
+def _patch_conv_repo(conv_repo):
+    """Patch ConversationRepository in both agent_service (module-level import) and
+    the source persistence module (used by agent.py's lazy imports)."""
+    from contextlib import ExitStack
+
+    class _MultiPatch:
+        def __enter__(self):
+            self._stack = ExitStack()
+            # Covers agent_service.py top-level import
+            self._stack.enter_context(
+                patch(
+                    "personal_assistant.services.agent_service.ConversationRepository",
+                    return_value=conv_repo,
+                )
+            )
+            # Covers agent.py lazy imports for ConversationRepository
+            self._stack.enter_context(
+                patch(
+                    "personal_assistant.persistence.repository.ConversationRepository",
+                    return_value=conv_repo,
+                )
+            )
+            return self
+
+        def __exit__(self, *args):
+            self._stack.__exit__(*args)
+
+    return _MultiPatch()
+
+
+def _patch_graph():
+    mock = _make_mock_graph()
+    return patch("personal_assistant.core.agent.create_agent", return_value=mock), mock
+
+
+# ---------------------------------------------------------------------------
+# CRUD: create_agent
+# ---------------------------------------------------------------------------
+
+
+class TestCreateAgent:
+    async def test_creates_and_returns_view(self, service, user_id, mock_ws_row, mock_agent_row):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=None)
+        ws_repo.create_agent = AsyncMock(return_value=mock_agent_row)
+
+        with _patch_ws_repo(ws_repo):
+            view = await service.create_agent(
+                user_id,
+                "ws",
+                name="Bot",
+                description="A bot",
+                system_prompt="Be helpful.",
+                session=session,
+            )
+
+        assert isinstance(view, AgentView)
+        assert view.config.name == "Bot"
+        assert view.config.system_prompt == "Be helpful."
+
+    async def test_duplicate_agent_raises(self, service, user_id, mock_ws_row, mock_agent_row):
+        session = MagicMock()
+        # get_agent returns existing row → should raise AlreadyExistsError
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+
+        with _patch_ws_repo(ws_repo), pytest.raises(AlreadyExistsError):
+            await service.create_agent(
+                user_id, "ws", name="Bot", description="x", system_prompt="y", session=session
+            )
+
+    async def test_unknown_workspace_raises(self, service, user_id):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=None)
+
+        with _patch_ws_repo(ws_repo), pytest.raises(NotFoundError):
+            await service.create_agent(
+                user_id, "ghost", name="Bot", description="x", system_prompt="y", session=session
+            )
+
+
+# ---------------------------------------------------------------------------
+# CRUD: list_agents
+# ---------------------------------------------------------------------------
+
+
+class TestListAgents:
+    async def test_returns_all_agents(self, service, user_id, mock_ws_row, mock_agent_row):
+        session = MagicMock()
+        second_row = MagicMock()
+        second_row.name = "Alpha"
+        second_row.description = "x"
+        second_row.system_prompt = "y"
+        second_row.provider = None
+        second_row.model = None
+        second_row.allowed_tools = []
+
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_rows=[mock_agent_row, second_row])
+
+        with _patch_ws_repo(ws_repo):
+            views = await service.list_agents(user_id, "ws", session=session)
+
+        assert len(views) == 2
+
+    async def test_unknown_workspace_raises(self, service, user_id):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=None)
+
+        with _patch_ws_repo(ws_repo), pytest.raises(NotFoundError):
+            await service.list_agents(user_id, "ghost", session=session)
+
+
+# ---------------------------------------------------------------------------
+# CRUD: get_agent
+# ---------------------------------------------------------------------------
+
+
+class TestGetAgent:
+    async def test_returns_view(self, service, user_id, mock_ws_row, mock_agent_row):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+
+        with _patch_ws_repo(ws_repo):
+            view = await service.get_agent(user_id, "ws", "Bot", session=session)
+
+        assert view.config.name == "Bot"
+
+    async def test_unknown_workspace_raises(self, service, user_id):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=None)
+
+        with _patch_ws_repo(ws_repo), pytest.raises(NotFoundError):
+            await service.get_agent(user_id, "ghost", "Bot", session=session)
+
+    async def test_unknown_agent_raises(self, service, user_id, mock_ws_row):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=None)
+
+        with _patch_ws_repo(ws_repo), pytest.raises(NotFoundError):
+            await service.get_agent(user_id, "ws", "ghost", session=session)
+
+
+# ---------------------------------------------------------------------------
+# CRUD: update_agent
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateAgent:
+    async def test_updates_fields(self, service, user_id, mock_ws_row, mock_agent_row):
+        session = MagicMock()
+        updated_row = MagicMock()
+        updated_row.name = "Bot"
+        updated_row.description = "A bot"
+        updated_row.system_prompt = "New prompt."
+        updated_row.provider = None
+        updated_row.model = None
+        updated_row.allowed_tools = []
+
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+        ws_repo.upsert_agent = AsyncMock(return_value=updated_row)
+
+        with _patch_ws_repo(ws_repo):
+            view = await service.update_agent(
+                user_id, "ws", "Bot", system_prompt="New prompt.", session=session
+            )
+
+        assert view.config.system_prompt == "New prompt."
+
+    async def test_unknown_workspace_raises(self, service, user_id):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=None)
+
+        with _patch_ws_repo(ws_repo), pytest.raises(NotFoundError):
+            await service.update_agent(user_id, "ghost", "Bot", session=session)
+
+    async def test_unknown_agent_raises(self, service, user_id, mock_ws_row):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=None)
+
+        with _patch_ws_repo(ws_repo), pytest.raises(NotFoundError):
+            await service.update_agent(user_id, "ws", "ghost", session=session)
+
+
+# ---------------------------------------------------------------------------
+# CRUD: delete_agent
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteAgent:
+    async def test_deletes_agent(self, service, user_id, mock_ws_row, mock_agent_row):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+
+        with _patch_ws_repo(ws_repo):
+            await service.delete_agent(user_id, "ws", "Bot", session=session)
+
+        ws_repo.delete_agent.assert_called_once_with(mock_ws_row.id, "Bot")
+
+    async def test_unknown_workspace_raises(self, service, user_id):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=None)
+
+        with _patch_ws_repo(ws_repo), pytest.raises(NotFoundError):
+            await service.delete_agent(user_id, "ghost", "Bot", session=session)
+
+    async def test_unknown_agent_raises(self, service, user_id, mock_ws_row):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=None)
+
+        with _patch_ws_repo(ws_repo), pytest.raises(NotFoundError):
+            await service.delete_agent(user_id, "ws", "ghost", session=session)
+
+
+# ---------------------------------------------------------------------------
+# run_agent
+# ---------------------------------------------------------------------------
+
+
+class TestRunAgent:
+    async def test_returns_reply_and_new_conv_id(
+        self, service, user_id, mock_ws_row, mock_agent_row
+    ):
+        session = AsyncMock()
+        conv = _make_mock_conv(user_id=user_id)
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+        conv_repo = _mock_conv_repo(conv=conv)
+
+        patcher, _ = _patch_graph()
+        with patcher, _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo):
+            reply, conv_id = await service.run_agent(
+                user_id, "ws", "Bot", "Hello", conversation_id=None, session=session
+            )
+
+        assert reply == "Test response"
+        assert isinstance(conv_id, uuid.UUID)
+
+    async def test_reuses_existing_conversation(
+        self, service, user_id, mock_ws_row, mock_agent_row, cache
+    ):
+        session = AsyncMock()
+        existing_conv_id = uuid.uuid4()
+        conv = _make_mock_conv(conv_id=existing_conv_id, user_id=user_id)
+        messages = [HumanMessage(content="prev"), AIMessage(content="ok")]
+
+        # Pre-populate cache
+        await cache.set(user_id, "ws", existing_conv_id, messages)
+
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+        conv_repo = _mock_conv_repo(conv=conv)
+
+        patcher, _ = _patch_graph()
+        with patcher, _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo):
+            _reply, conv_id = await service.run_agent(
+                user_id, "ws", "Bot", "Hello", conversation_id=existing_conv_id, session=session
+            )
+
+        assert conv_id == existing_conv_id
+        # Cache was a hit, so load_messages should NOT be called
+        conv_repo.load_messages.assert_not_called()
+
+    async def test_loads_history_from_db_on_cache_miss(
+        self, service, user_id, mock_ws_row, mock_agent_row
+    ):
+        session = AsyncMock()
+        existing_conv_id = uuid.uuid4()
+        conv = _make_mock_conv(conv_id=existing_conv_id, user_id=user_id)
+        # No cache pre-population → should hit DB
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+        conv_repo = _mock_conv_repo(conv=conv)
+
+        patcher, _ = _patch_graph()
+        with patcher, _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo):
+            await service.run_agent(
+                user_id, "ws", "Bot", "Hello", conversation_id=existing_conv_id, session=session
+            )
+
+        conv_repo.load_messages.assert_called_once_with(existing_conv_id)
+
+    async def test_unknown_workspace_raises(self, service, user_id):
+        session = AsyncMock()
+        ws_repo = _mock_ws_repo(ws_row=None)
+
+        with _patch_ws_repo(ws_repo), pytest.raises(NotFoundError):
+            await service.run_agent(
+                user_id, "ghost", "Bot", "Hi", conversation_id=None, session=session
+            )
+
+    async def test_unknown_agent_raises(self, service, user_id, mock_ws_row):
+        session = AsyncMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=None)
+
+        with _patch_ws_repo(ws_repo), pytest.raises(NotFoundError):
+            await service.run_agent(
+                user_id, "ws", "ghost", "Hi", conversation_id=None, session=session
+            )
+
+    async def test_invalid_conversation_id_raises(
+        self, service, user_id, mock_ws_row, mock_agent_row
+    ):
+        """If conv_id is given but doesn't belong to this user/workspace/agent → NotFoundError."""
+        session = AsyncMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+        # get_conversation_for_agent returns None → not found
+        conv_repo = _mock_conv_repo(conv=None)
+
+        with _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo), pytest.raises(NotFoundError):
+            await service.run_agent(
+                user_id, "ws", "Bot", "Hi", conversation_id=uuid.uuid4(), session=session
+            )
+
+    async def test_cache_is_updated_after_run(
+        self, service, user_id, mock_ws_row, mock_agent_row, cache
+    ):
+        session = AsyncMock()
+        conv = _make_mock_conv(user_id=user_id)
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+        conv_repo = _mock_conv_repo(conv=conv)
+
+        patcher, _ = _patch_graph()
+        with patcher, _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo):
+            _, conv_id = await service.run_agent(
+                user_id, "ws", "Bot", "Hello", conversation_id=None, session=session
+            )
+
+        # Cache should now contain the conversation
+        cached = await cache.get(user_id, "ws", conv_id)
+        assert cached is not None
+
+
+# ---------------------------------------------------------------------------
+# stream_agent
+# ---------------------------------------------------------------------------
+
+
+class TestStreamAgent:
+    async def test_returns_iterator_and_conv_id(
+        self, service, user_id, mock_ws_row, mock_agent_row
+    ):
+        session = AsyncMock()
+        conv = _make_mock_conv(user_id=user_id)
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+        conv_repo = _mock_conv_repo(conv=conv)
+
+        patcher, _ = _patch_graph()
+        with patcher, _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo):
+            tokens, conv_id = await service.stream_agent(
+                user_id, "ws", "Bot", "Hello", conversation_id=None, session=session
+            )
+            assert isinstance(conv_id, uuid.UUID)
+            chunks = [c async for c in tokens]
+
+        assert len(chunks) > 0
+        assert all(isinstance(c, str) for c in chunks)
+
+    async def test_unknown_workspace_raises(self, service, user_id):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=None)
+
+        with _patch_ws_repo(ws_repo), pytest.raises(NotFoundError):
+            await service.stream_agent(
+                user_id, "ghost", "Bot", "Hi", conversation_id=None, session=session
+            )
+
+    async def test_unknown_agent_raises(self, service, user_id, mock_ws_row):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=None)
+
+        with _patch_ws_repo(ws_repo), pytest.raises(NotFoundError):
+            await service.stream_agent(
+                user_id, "ws", "ghost", "Hi", conversation_id=None, session=session
+            )
+
+
+# ---------------------------------------------------------------------------
+# list_conversations
+# ---------------------------------------------------------------------------
+
+
+class TestListConversations:
+    async def test_returns_views(self, service, user_id):
+        session = MagicMock()
+        conv_id = uuid.uuid4()
+        conv = _make_mock_conv(conv_id=conv_id, user_id=user_id)
+        conv_repo = _mock_conv_repo(conv=conv)
+
+        with _patch_conv_repo(conv_repo):
+            views = await service.list_conversations(user_id, "ws", session=session)
 
         assert len(views) == 1
         assert isinstance(views[0], ConversationView)
         assert views[0].id == conv_id
 
-    async def test_unknown_workspace_raises(self, service) -> None:
+    async def test_none_user_id_raises(self, service):
+        session = MagicMock()
         with pytest.raises(NotFoundError):
-            await service.list_conversations("ghost", "Bot", MagicMock())
+            await service.list_conversations(None, "ws", session=session)
 
-    async def test_unknown_agent_raises(self, service, workspace) -> None:
-        with pytest.raises(NotFoundError):
-            await service.list_conversations("ws", "ghost", MagicMock())
+
+# ---------------------------------------------------------------------------
+# delete_conversation
+# ---------------------------------------------------------------------------
 
 
 class TestDeleteConversation:
-    async def test_deletes_and_evicts(self, service, workspace) -> None:
-        _create_agent(service)
+    async def test_deletes_and_invalidates_cache(self, service, user_id, cache):
+        session = AsyncMock()
         conv_id = uuid.uuid4()
-        mock_session = MagicMock()
-        mock_repo = MagicMock()
-        mock_repo.delete_conversation = AsyncMock(return_value=True)
+        conv = _make_mock_conv(conv_id=conv_id, user_id=user_id)
+        # Pre-populate cache
+        await cache.set(user_id, "ws", conv_id, [HumanMessage(content="hi")])
 
-        patcher, _ = _make_graph_patcher()
-        with patcher:
-            await service.run_agent("ws", "Bot", "hi", conversation_id=None, session=None)
+        conv_repo = _mock_conv_repo(conv=conv)
 
-        with patch(
-            "personal_assistant.persistence.repository.ConversationRepository",
-            return_value=mock_repo,
-        ):
-            await service.delete_conversation("ws", "Bot", conv_id, mock_session)
+        with _patch_conv_repo(conv_repo):
+            await service.delete_conversation(user_id, "ws", conv_id, session=session)
 
-        mock_repo.delete_conversation.assert_called_once_with(conv_id)
+        # Cache entry should be gone
+        assert await cache.get(user_id, "ws", conv_id) is None
 
-    async def test_not_found_raises(self, service, workspace) -> None:
-        _create_agent(service)
-        mock_session = MagicMock()
-        mock_repo = MagicMock()
-        mock_repo.delete_conversation = AsyncMock(return_value=False)
+    async def test_not_found_raises(self, service, user_id):
+        session = AsyncMock()
+        conv_repo = _mock_conv_repo(conv=None)
 
-        with (
-            patch(
-                "personal_assistant.persistence.repository.ConversationRepository",
-                return_value=mock_repo,
-            ),
-            pytest.raises(NotFoundError),
-        ):
-            await service.delete_conversation("ws", "Bot", uuid.uuid4(), mock_session)
-
-    async def test_unknown_workspace_raises(self, service) -> None:
-        with pytest.raises(NotFoundError):
-            await service.delete_conversation("ghost", "Bot", uuid.uuid4(), MagicMock())
-
-    async def test_unknown_agent_raises(self, service, workspace) -> None:
-        _create_agent(service)
-        with pytest.raises(NotFoundError):
-            await service.delete_conversation("ws", "ghost", uuid.uuid4(), MagicMock())
+        with _patch_conv_repo(conv_repo), pytest.raises(NotFoundError):
+            await service.delete_conversation(user_id, "ws", uuid.uuid4(), session=session)

@@ -99,6 +99,7 @@ async def test_delete_agent(http_client: httpx.AsyncClient) -> None:
 
 
 async def test_reset_agent(http_client: httpx.AsyncClient) -> None:
+    # The reset endpoint has been removed; expect 404 or 405.
     response = await http_client.post("/workspaces/default/agents/Assistant/reset")
 
-    assert response.status_code == 204
+    assert response.status_code in (404, 405)

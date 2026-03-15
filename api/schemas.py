@@ -78,8 +78,7 @@ class WorkspaceDetailResponse(BaseModel):
 
 class ConversationResponse(BaseModel):
     id: uuid.UUID
-    agent_name: str
-    workspace_name: str | None
+    workspace_name: str
     created_at: datetime
     updated_at: datetime
 
@@ -87,7 +86,6 @@ class ConversationResponse(BaseModel):
     def from_view(cls, view: ConversationView) -> ConversationResponse:
         return cls(
             id=view.id,
-            agent_name=view.agent_name,
             workspace_name=view.workspace_name,
             created_at=view.created_at,
             updated_at=view.updated_at,
@@ -139,7 +137,7 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
-    token_type: str = "bearer"
+    token_type: str = "Bearer"
 
 
 class RefreshRequest(BaseModel):

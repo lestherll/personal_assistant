@@ -18,7 +18,7 @@ async def test_health_returns_200(http_client: httpx.AsyncClient) -> None:
 async def test_health_response_body(http_client: httpx.AsyncClient) -> None:
     response = await http_client.get("/health")
 
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
 
 
 async def test_health_content_type(http_client: httpx.AsyncClient) -> None:

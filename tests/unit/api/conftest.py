@@ -80,6 +80,11 @@ def make_workspace_detail_view(name: str = "ws1") -> WorkspaceDetailView:
 @pytest.fixture
 def mock_workspace_service() -> MagicMock:
     svc = MagicMock()
+    svc.create_workspace = AsyncMock()
+    svc.list_workspaces = AsyncMock(return_value=[])
+    svc.get_workspace = AsyncMock()
+    svc.update_workspace = AsyncMock()
+    svc.delete_workspace = AsyncMock()
     svc.chat = AsyncMock()
     svc.stream_chat = AsyncMock()
     return svc
@@ -88,6 +93,11 @@ def mock_workspace_service() -> MagicMock:
 @pytest.fixture
 def mock_agent_service() -> MagicMock:
     svc = MagicMock()
+    svc.create_agent = AsyncMock()
+    svc.list_agents = AsyncMock(return_value=[])
+    svc.get_agent = AsyncMock()
+    svc.update_agent = AsyncMock()
+    svc.delete_agent = AsyncMock()
     svc.run_agent = AsyncMock()
     svc.stream_agent = AsyncMock()
     return svc

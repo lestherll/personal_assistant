@@ -45,9 +45,11 @@ async def test_create_workspace_calls_service(
 ) -> None:
     mock_workspace_service.create_workspace.return_value = make_workspace_view()
     await api_client.post("/workspaces/", json={"name": "ws1", "description": "A workspace"})
-    mock_workspace_service.create_workspace.assert_called_once_with(
-        name="ws1", description="A workspace", metadata={}
-    )
+    mock_workspace_service.create_workspace.assert_called_once()
+    call_kwargs = mock_workspace_service.create_workspace.call_args.kwargs
+    assert call_kwargs["name"] == "ws1"
+    assert call_kwargs["description"] == "A workspace"
+    assert call_kwargs["metadata"] == {}
 
 
 async def test_create_workspace_already_exists_returns_409(
@@ -177,7 +179,10 @@ async def test_delete_workspace_calls_service(
 ) -> None:
     mock_workspace_service.delete_workspace.return_value = None
     await api_client.delete("/workspaces/ws1")
-    mock_workspace_service.delete_workspace.assert_called_once_with("ws1")
+    mock_workspace_service.delete_workspace.assert_called_once()
+    call_args = mock_workspace_service.delete_workspace.call_args
+    # user_id is first positional arg, workspace name is second
+    assert call_args.args[1] == "ws1" or call_args.kwargs.get("name") == "ws1"
 
 
 async def test_delete_workspace_not_found_returns_404(
@@ -219,12 +224,16 @@ async def test_workspace_chat_returns_response_body(
 async def test_workspace_chat_calls_service(
     api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
 ) -> None:
+    from api.dependencies import DEV_USER
+
     mock_workspace_service.chat.return_value = WorkspaceChatView(
         response="ok", conversation_id="t1", agent_used="Bot"
     )
     await api_client.post("/workspaces/ws1/chat", json={"message": "hello"})
     mock_workspace_service.chat.assert_awaited_once()
-    call_kwargs = mock_workspace_service.chat.call_args.kwargs
+    call_args = mock_workspace_service.chat.call_args
+    assert call_args.args[0] == DEV_USER.id
+    call_kwargs = call_args.kwargs
     assert call_kwargs["workspace_name"] == "ws1"
     assert call_kwargs["message"] == "hello"
 

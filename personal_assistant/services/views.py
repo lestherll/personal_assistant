@@ -44,8 +44,7 @@ class WorkspaceDetailView:
 @dataclass
 class ConversationView:
     id: uuid.UUID
-    agent_name: str
-    workspace_name: str | None
+    workspace_name: str
     created_at: datetime
     updated_at: datetime
 

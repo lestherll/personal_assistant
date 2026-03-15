@@ -1,19 +1,22 @@
 from __future__ import annotations
 
-import asyncio
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from langchain_core.tools import BaseTool
 
 from api.exception_handlers import register_exception_handlers
-from api.routers import agents, auth, providers, workspaces
+from api.routers import agents, auth, health, providers, workspaces
 from personal_assistant.bootstrap import build_registry
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.persistence.database import build_engine, build_session_factory
-from personal_assistant.services.conversation_pool import ConversationPool
-from personal_assistant.services.user_orchestrator_registry import UserOrchestratorRegistry
+from personal_assistant.services.agent_service import AgentService
+from personal_assistant.services.conversation_cache import InMemoryConversationCache
+from personal_assistant.services.workspace_service import WorkspaceService
+from personal_assistant.tools.example_tool import AgentInformationTool, EchoTool
+from personal_assistant.tools.indeed_tool import IndeedJobSearchTool
 from personal_assistant.workspaces.default_workspace import create_default_workspace
 
 
@@ -31,24 +34,21 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # --- Provider registry ---
     registry = build_registry()
 
-    # --- Orchestrator + default workspace (template — never mutated by users) ---
+    # --- Template orchestrator (for dev/REPL fallback) ---
     orchestrator = Orchestrator(registry)
     create_default_workspace(orchestrator)
     app.state.orchestrator = orchestrator
 
-    # --- Per-user orchestrator registry ---
-    app.state.user_orchestrators = UserOrchestratorRegistry(orchestrator)
+    # --- Tools available to all agents ---
+    tools: list[BaseTool] = [EchoTool(), AgentInformationTool(), IndeedJobSearchTool()]
+    app.state.tools = tools
 
-    # --- Conversation pool ---
-    pool = ConversationPool(max_size=1000, ttl_seconds=7200.0)
-    app.state.conversation_pool = pool
-
-    async def _sweep() -> None:
-        while True:
-            await asyncio.sleep(900)  # 15 min
-            pool.evict_expired()
-
-    sweep_task = asyncio.create_task(_sweep())
+    # --- Singleton services ---
+    cache = InMemoryConversationCache(max_size=1000)
+    agent_service = AgentService(registry, tools, cache)
+    workspace_service = WorkspaceService(registry, agent_service)
+    app.state.agent_service = agent_service
+    app.state.workspace_service = workspace_service
 
     # --- Persistence (optional) ---
     engine = None
@@ -60,8 +60,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     yield
 
-    sweep_task.cancel()
-
     if engine is not None:
         await engine.dispose()
 
@@ -72,8 +70,4 @@ app.include_router(auth.router)
 app.include_router(workspaces.router)
 app.include_router(agents.router)
 app.include_router(providers.router)
-
-
-@app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+app.include_router(health.router)

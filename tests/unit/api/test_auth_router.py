@@ -5,7 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -38,10 +38,18 @@ def mock_session() -> MagicMock:
 
 
 @pytest.fixture
-async def auth_client(mock_session: MagicMock) -> AsyncIterator[httpx.AsyncClient]:
+def mock_orchestrator() -> MagicMock:
+    return MagicMock()
+
+
+@pytest.fixture
+async def auth_client(
+    mock_session: MagicMock, mock_orchestrator: MagicMock
+) -> AsyncIterator[httpx.AsyncClient]:
     app = FastAPI()
     register_exception_handlers(app)
     app.include_router(auth.router)
+    app.state.orchestrator = mock_orchestrator
     app.dependency_overrides[get_db_session] = lambda: mock_session
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
@@ -56,10 +64,20 @@ async def auth_client(mock_session: MagicMock) -> AsyncIterator[httpx.AsyncClien
 
 class TestRegisterEndpoint:
     async def test_register_success(
-        self, auth_client: httpx.AsyncClient, mock_session: MagicMock
+        self,
+        auth_client: httpx.AsyncClient,
+        mock_session: MagicMock,
+        mock_orchestrator: MagicMock,
     ) -> None:
         user = _make_user()
-        with _patch_auth_service("register", return_value=(user, "access_tok", "refresh_tok")):
+        fork_mock = AsyncMock()
+        with (
+            _patch_auth_service("register", return_value=(user, "access_tok", "refresh_tok")),
+            patch(
+                "api.routers.auth.fork_default_workspace",
+                fork_mock,
+            ),
+        ):
             resp = await auth_client.post(
                 "/auth/register",
                 json={"username": "alice", "email": "alice@example.com", "password": "pw"},
@@ -68,6 +86,9 @@ class TestRegisterEndpoint:
         data = resp.json()
         assert data["user"]["username"] == "alice"
         assert data["tokens"]["access_token"] == "access_tok"
+        fork_mock.assert_awaited_once()
+        call_args = fork_mock.call_args
+        assert call_args.kwargs["user_id"] == user.id or call_args.args[0] == user.id
 
     async def test_duplicate_user_returns_409(self, auth_client: httpx.AsyncClient) -> None:
         with _patch_auth_service("register", side_effect=AlreadyExistsError("user", "alice")):
@@ -88,7 +109,7 @@ class TestLoginEndpoint:
         user = _make_user()
         with _patch_auth_service("login", return_value=(user, "acc", "ref")):
             resp = await auth_client.post(
-                "/auth/login", json={"username": "alice", "password": "secret"}
+                "/auth/login", data={"username": "alice", "password": "secret"}
             )
         assert resp.status_code == 200
         data = resp.json()
@@ -97,7 +118,7 @@ class TestLoginEndpoint:
     async def test_bad_credentials_returns_401(self, auth_client: httpx.AsyncClient) -> None:
         with _patch_auth_service("login", side_effect=AuthError("Invalid credentials")):
             resp = await auth_client.post(
-                "/auth/login", json={"username": "alice", "password": "wrong"}
+                "/auth/login", data={"username": "alice", "password": "wrong"}
             )
         assert resp.status_code == 401
 

@@ -294,7 +294,7 @@ class Agent:
     async def start_conversation(
         self,
         session: AsyncSession,
-        workspace_name: str | None = None,
+        workspace_name: str,
         user_id: uuid.UUID | None = None,
     ) -> uuid.UUID:
         """Create a new conversation in the DB and bind this agent to it.
@@ -304,7 +304,7 @@ class Agent:
         from personal_assistant.persistence.repository import ConversationRepository
 
         repo = ConversationRepository(session)
-        conv = await repo.create_conversation(self.config.name, workspace_name, user_id=user_id)
+        conv = await repo.create_conversation(workspace_name, user_id=user_id)
         self._conversation_id = conv.id
         self._history_loaded = True  # Fresh conversation — nothing to load
         self._history = []
@@ -342,11 +342,16 @@ class Agent:
         await self._ensure_history_loaded(session)
         self._history.append(HumanMessage(content=task))
 
+        _meta: dict[str, object] = {
+            "agent_name": self.config.name,
+            "provider": self.config.provider,
+            "model": self.config.model,
+        }
         if session is not None and self._conversation_id is not None:
             from personal_assistant.persistence.repository import ConversationRepository
 
             repo = ConversationRepository(session)
-            await repo.save_message(self._conversation_id, "human", task)
+            await repo.save_message(self._conversation_id, "human", task, metadata=_meta)
 
         result = await self._graph.ainvoke({"messages": self._history})
         self._history = result["messages"]
@@ -355,7 +360,7 @@ class Agent:
 
         if session is not None and self._conversation_id is not None:
             repo = ConversationRepository(session)
-            await repo.save_message(self._conversation_id, "ai", response)
+            await repo.save_message(self._conversation_id, "ai", response, metadata=_meta)
             await repo.touch_conversation(self._conversation_id)
 
         return response
@@ -371,11 +376,16 @@ class Agent:
         await self._ensure_history_loaded(session)
         self._history.append(HumanMessage(content=task))
 
+        _meta: dict[str, object] = {
+            "agent_name": self.config.name,
+            "provider": self.config.provider,
+            "model": self.config.model,
+        }
         if session is not None and self._conversation_id is not None:
             from personal_assistant.persistence.repository import ConversationRepository
 
             repo = ConversationRepository(session)
-            await repo.save_message(self._conversation_id, "human", task)
+            await repo.save_message(self._conversation_id, "human", task, metadata=_meta)
 
         async for chunk in self._graph.astream(
             {"messages": self._history},
@@ -390,7 +400,7 @@ class Agent:
             if isinstance(last, AIMessage):
                 ai_content = last.content if isinstance(last.content, str) else str(last.content)
                 repo = ConversationRepository(session)
-                await repo.save_message(self._conversation_id, "ai", ai_content)
+                await repo.save_message(self._conversation_id, "ai", ai_content, metadata=_meta)
                 await repo.touch_conversation(self._conversation_id)
 
     def clone(self, *, llm: BaseChatModel | None = None) -> Agent:
@@ -418,12 +428,26 @@ class Agent:
     def history(self) -> list[BaseMessage]:
         return list(self._history)
 
+    def restore(self, messages: list[BaseMessage], conversation_id: uuid.UUID) -> None:
+        """Restore agent state from pre-loaded history (skips the lazy DB load).
 
-def _row_to_message(row: MessageRow) -> BaseMessage:
+        Called by the service layer when history has already been fetched from
+        the DB or the conversation cache before constructing this agent.
+        """
+        self._conversation_id = conversation_id
+        self._history = list(messages)
+        self._history_loaded = True
+
+
+def row_to_message(row: MessageRow) -> BaseMessage:
     """Convert a persisted Message row back to a LangChain BaseMessage."""
     if row.role == "human":
         return HumanMessage(content=row.content)
     return AIMessage(content=row.content)
+
+
+def _row_to_message(row: MessageRow) -> BaseMessage:
+    return row_to_message(row)
 
 
 def _get_from_llm_or_registry(

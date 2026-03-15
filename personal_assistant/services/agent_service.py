@@ -1,33 +1,56 @@
+"""DB-first, stateless AgentService.
+
+Each method receives ``user_id`` and ``session`` as explicit arguments.
+The service is a singleton — it holds no per-user or per-request state.
+"""
+
 from __future__ import annotations
 
 import uuid
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
-from personal_assistant.core.agent import Agent, AgentConfig
-from personal_assistant.core.orchestrator import Orchestrator
-from personal_assistant.core.workspace import Workspace
-from personal_assistant.services.conversation_service import ConversationService
+from personal_assistant.core.agent import Agent, AgentConfig, row_to_message
+from personal_assistant.persistence.repository import ConversationRepository
+from personal_assistant.persistence.user_workspace_repository import UserWorkspaceRepository
+from personal_assistant.services.conversation_cache import ConversationCache
 from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
 from personal_assistant.services.views import AgentConfigView, AgentView, ConversationView
 
 if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from personal_assistant.persistence.models import UserAgent, UserWorkspace
+    from personal_assistant.providers.registry import ProviderRegistry
 
 
 class AgentService:
+    """Stateless agent CRUD + chat service backed by the DB.
+
+    Args:
+        registry: Provider registry for resolving LLMs.
+        tools: All available tools; filtered per agent via ``allowed_tools``.
+        cache: Conversation history cache.
+    """
+
     def __init__(
-        self, orchestrator: Orchestrator, conversation_service: ConversationService
+        self,
+        registry: ProviderRegistry,
+        tools: list[BaseTool],
+        cache: ConversationCache,
     ) -> None:
-        self._orchestrator = orchestrator
-        self._conversation_service = conversation_service
+        self._registry = registry
+        self._tools = tools
+        self._cache = cache
 
     # ------------------------------------------------------------------
     # CRUD
     # ------------------------------------------------------------------
 
-    def create_agent(
+    async def create_agent(
         self,
+        user_id: uuid.UUID,
         workspace_name: str,
         name: str,
         description: str,
@@ -35,36 +58,57 @@ class AgentService:
         provider: str | None = None,
         model: str | None = None,
         allowed_tools: list[str] | None = None,
+        session: AsyncSession | None = None,
     ) -> AgentView:
-        ws = self._get_workspace_or_raise(workspace_name)
-        if ws.get_agent(name) is not None:
+        if session is None:
+            raise NotFoundError("workspace", workspace_name)
+
+        repo = UserWorkspaceRepository(session)
+        ws_row = await repo.get_workspace(user_id, workspace_name)
+        if ws_row is None:
+            raise NotFoundError("workspace", workspace_name)
+
+        existing = await repo.get_agent(ws_row.id, name)
+        if existing is not None:
             raise AlreadyExistsError("agent", name)
-        config = AgentConfig(
-            name=name,
-            description=description,
-            system_prompt=system_prompt,
-            provider=provider,
-            model=model,
-            allowed_tools=allowed_tools or [],
+
+        agent_row = await repo.create_agent(
+            ws_row.id, name, description, system_prompt, provider, model, allowed_tools or []
         )
-        agent = self._orchestrator.create_agent(config, workspace_name)
-        return self._to_view(agent)
+        return self._row_to_view(agent_row)
 
-    def list_agents(self, workspace_name: str) -> list[AgentView]:
-        ws = self._get_workspace_or_raise(workspace_name)
-        return [
-            self._to_view(agent)
-            for agent_name in ws.list_agents()
-            if (agent := ws.get_agent(agent_name)) is not None
-        ]
-
-    def get_agent(self, workspace_name: str, agent_name: str) -> AgentView:
-        ws = self._get_workspace_or_raise(workspace_name)
-        agent = self._get_agent_or_raise(ws, agent_name)
-        return self._to_view(agent)
-
-    def update_agent(
+    async def list_agents(
         self,
+        user_id: uuid.UUID,
+        workspace_name: str,
+        session: AsyncSession | None = None,
+    ) -> list[AgentView]:
+        if session is None:
+            raise NotFoundError("workspace", workspace_name)
+
+        repo = UserWorkspaceRepository(session)
+        ws_row = await repo.get_workspace(user_id, workspace_name)
+        if ws_row is None:
+            raise NotFoundError("workspace", workspace_name)
+
+        rows = await repo.list_agents(ws_row.id)
+        return [self._row_to_view(r) for r in rows]
+
+    async def get_agent(
+        self,
+        user_id: uuid.UUID,
+        workspace_name: str,
+        agent_name: str,
+        session: AsyncSession | None = None,
+    ) -> AgentView:
+        _ws_row, agent_row = await self._get_ws_and_agent_or_raise(
+            user_id, workspace_name, agent_name, session
+        )
+        return self._row_to_view(agent_row)
+
+    async def update_agent(
+        self,
+        user_id: uuid.UUID,
         workspace_name: str,
         agent_name: str,
         *,
@@ -73,29 +117,39 @@ class AgentService:
         provider: str | None = None,
         model: str | None = None,
         allowed_tools: list[str] | None = None,
+        session: AsyncSession | None = None,
     ) -> AgentView:
-        """Update an agent's config by rebuilding it.
-
-        Note: rebuilding creates a new Agent instance, which resets conversation history.
-        """
-        ws = self._get_workspace_or_raise(workspace_name)
-        existing = self._get_agent_or_raise(ws, agent_name)
-        c = existing.config
-        new_config = AgentConfig(
-            name=c.name,
-            description=description if description is not None else c.description,
-            system_prompt=system_prompt if system_prompt is not None else c.system_prompt,
-            provider=provider if provider is not None else c.provider,
-            model=model if model is not None else c.model,
-            allowed_tools=allowed_tools if allowed_tools is not None else list(c.allowed_tools),
+        ws_row, agent_row = await self._get_ws_and_agent_or_raise(
+            user_id, workspace_name, agent_name, session
         )
-        agent = self._orchestrator.replace_agent(new_config, workspace_name)
-        return self._to_view(agent)
+        assert session is not None  # guaranteed by _get_ws_and_agent_or_raise
 
-    def delete_agent(self, workspace_name: str, agent_name: str) -> None:
-        ws = self._get_workspace_or_raise(workspace_name)
-        self._get_agent_or_raise(ws, agent_name)
-        ws.remove_agent(agent_name)
+        repo = UserWorkspaceRepository(session)
+        updated = await repo.upsert_agent(
+            ws_row.id,
+            agent_row.name,
+            description if description is not None else agent_row.description,
+            system_prompt if system_prompt is not None else agent_row.system_prompt,
+            provider if provider is not None else agent_row.provider,
+            model if model is not None else agent_row.model,
+            allowed_tools if allowed_tools is not None else list(agent_row.allowed_tools),
+        )
+        return self._row_to_view(updated)
+
+    async def delete_agent(
+        self,
+        user_id: uuid.UUID,
+        workspace_name: str,
+        agent_name: str,
+        session: AsyncSession | None = None,
+    ) -> None:
+        ws_row, _agent_row = await self._get_ws_and_agent_or_raise(
+            user_id, workspace_name, agent_name, session
+        )
+        assert session is not None  # guaranteed by _get_ws_and_agent_or_raise
+
+        repo = UserWorkspaceRepository(session)
+        await repo.delete_agent(ws_row.id, agent_name)
 
     # ------------------------------------------------------------------
     # Chat
@@ -103,6 +157,7 @@ class AgentService:
 
     async def run_agent(
         self,
+        user_id: uuid.UUID | None,
         workspace_name: str,
         agent_name: str,
         message: str,
@@ -110,15 +165,18 @@ class AgentService:
         conversation_id: uuid.UUID | None,
         session: AsyncSession | None,
     ) -> tuple[str, uuid.UUID]:
-        """Send a message to an agent and return (reply, conversation_id)."""
-        clone, conv_id = await self._conversation_service.get_or_create_clone(
-            workspace_name, agent_name, conversation_id, session
+        """Send a message to an agent and return ``(reply, conversation_id)``."""
+        agent, _ = await self._prepare_agent(
+            user_id, workspace_name, agent_name, conversation_id, session
         )
-        reply = await clone.run(message, session=session)
-        return reply, conv_id
+        reply = await agent.run(message, session=session)
+        # Update cache with post-run history
+        await self._cache.set(user_id, workspace_name, agent.conversation_id, agent.history)  # type: ignore[arg-type]
+        return reply, agent.conversation_id  # type: ignore[return-value]
 
     async def stream_agent(
         self,
+        user_id: uuid.UUID | None,
         workspace_name: str,
         agent_name: str,
         message: str,
@@ -126,42 +184,40 @@ class AgentService:
         conversation_id: uuid.UUID | None,
         session: AsyncSession | None,
     ) -> tuple[AsyncIterator[str], uuid.UUID]:
-        """Resolve the conversation then return (token_iterator, conversation_id).
+        """Resolve the conversation then return ``(token_iterator, conversation_id)``.
 
         The conversation_id is resolved before any tokens are yielded so callers
         can surface errors as proper HTTP responses rather than SSE events.
         """
-        clone, conv_id = await self._conversation_service.get_or_create_clone(
-            workspace_name, agent_name, conversation_id, session
+        agent, _ = await self._prepare_agent(
+            user_id, workspace_name, agent_name, conversation_id, session
         )
+        resolved_conv_id: uuid.UUID = agent.conversation_id  # type: ignore[assignment]
 
         async def _generate() -> AsyncIterator[str]:
-            async for msg in clone.stream(message, session=session):
+            async for msg in agent.stream(message, session=session):
                 content = msg.content
                 yield content if isinstance(content, str) else str(content)
+            # Update cache after stream completes
+            await self._cache.set(user_id, workspace_name, resolved_conv_id, agent.history)  # type: ignore[arg-type]
 
-        return _generate(), conv_id
+        return _generate(), resolved_conv_id
 
     async def list_conversations(
         self,
+        user_id: uuid.UUID | None,
         workspace_name: str,
-        agent_name: str,
         session: AsyncSession,
     ) -> list[ConversationView]:
-        """List all conversations for an agent (requires DB session)."""
-        self._get_workspace_or_raise(workspace_name)
-        ws = self._orchestrator.get_workspace(workspace_name)
-        assert ws is not None
-        self._get_agent_or_raise(ws, agent_name)
-
-        from personal_assistant.persistence.repository import ConversationRepository
+        """List all conversations for a workspace (requires DB session)."""
+        if user_id is None:
+            raise NotFoundError("workspace", workspace_name)
 
         repo = ConversationRepository(session)
-        convs = await repo.list_conversations(agent_name, workspace_name)
+        convs = await repo.list_conversations(workspace_name, user_id=user_id)
         return [
             ConversationView(
                 id=c.id,
-                agent_name=c.agent_name,
                 workspace_name=c.workspace_name,
                 created_at=c.created_at,
                 updated_at=c.updated_at,
@@ -171,72 +227,114 @@ class AgentService:
 
     async def delete_conversation(
         self,
+        user_id: uuid.UUID | None,
         workspace_name: str,
-        agent_name: str,
         conversation_id: uuid.UUID,
         session: AsyncSession,
     ) -> None:
-        """Delete a conversation record and evict its clone from the pool."""
-        self._get_workspace_or_raise(workspace_name)
-        ws = self._orchestrator.get_workspace(workspace_name)
-        assert ws is not None
-        self._get_agent_or_raise(ws, agent_name)
-
-        from personal_assistant.persistence.repository import ConversationRepository
-
-        repo = ConversationRepository(session)
-        deleted = await repo.delete_conversation(conversation_id)
-        if not deleted:
+        """Delete a conversation and invalidate its cache entry."""
+        conv_repo = ConversationRepository(session)
+        conv = await conv_repo.get_conversation_for_workspace(
+            conversation_id, workspace_name, user_id=user_id
+        )
+        if conv is None:
             raise NotFoundError("conversation", str(conversation_id))
-        self._conversation_service.reset_conversation(workspace_name, agent_name, conversation_id)
 
-    def reset_agent(
+        await session.delete(conv)
+        await session.commit()
+
+        if user_id is not None:
+            await self._cache.invalidate(user_id, workspace_name, conversation_id)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    async def _get_ws_and_agent_or_raise(
         self,
+        user_id: uuid.UUID | None,
         workspace_name: str,
         agent_name: str,
-        *,
-        conversation_id: uuid.UUID | None = None,
-    ) -> None:
-        """Clear conversation history.
-
-        If conversation_id is given, evicts the clone from the pool (DB rows kept).
-        If conversation_id is None, resets the template agent (REPL backward-compat).
-        """
-        if conversation_id is not None:
-            self._conversation_service.reset_conversation(
-                workspace_name, agent_name, conversation_id
-            )
-        else:
-            ws = self._get_workspace_or_raise(workspace_name)
-            agent = self._get_agent_or_raise(ws, agent_name)
-            agent.reset()
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
-
-    def _get_workspace_or_raise(self, workspace_name: str) -> Workspace:
-        ws = self._orchestrator.get_workspace(workspace_name)
-        if ws is None:
+        session: AsyncSession | None,
+    ) -> tuple[UserWorkspace, UserAgent]:
+        if session is None or user_id is None:
             raise NotFoundError("workspace", workspace_name)
-        return ws
 
-    def _get_agent_or_raise(self, ws: Workspace, agent_name: str) -> Agent:
-        agent = ws.get_agent(agent_name)
-        if agent is None:
+        repo = UserWorkspaceRepository(session)
+        ws_row = await repo.get_workspace(user_id, workspace_name)
+        if ws_row is None:
+            raise NotFoundError("workspace", workspace_name)
+
+        agent_row = await repo.get_agent(ws_row.id, agent_name)
+        if agent_row is None:
             raise NotFoundError("agent", agent_name)
-        return agent
 
-    def _to_view(self, agent: Agent) -> AgentView:
+        return ws_row, agent_row
+
+    async def _prepare_agent(
+        self,
+        user_id: uuid.UUID | None,
+        workspace_name: str,
+        agent_name: str,
+        conversation_id: uuid.UUID | None,
+        session: AsyncSession | None,
+    ) -> tuple[Agent, uuid.UUID | None]:
+        """Load config from DB, build an ephemeral Agent, bind conversation state."""
+        if session is None or user_id is None:
+            raise NotFoundError("workspace", workspace_name)
+
+        ws_repo = UserWorkspaceRepository(session)
+        ws_row = await ws_repo.get_workspace(user_id, workspace_name)
+        if ws_row is None:
+            raise NotFoundError("workspace", workspace_name)
+
+        agent_row = await ws_repo.get_agent(ws_row.id, agent_name)
+        if agent_row is None:
+            raise NotFoundError("agent", agent_name)
+
+        config = AgentConfig(
+            name=agent_row.name,
+            description=agent_row.description,
+            system_prompt=agent_row.system_prompt,
+            provider=agent_row.provider,
+            model=agent_row.model,
+            allowed_tools=list(agent_row.allowed_tools),
+        )
+        agent = Agent(config, self._registry, tools=self._tools)
+
+        conv_repo = ConversationRepository(session)
+
+        if conversation_id is not None:
+            conv = await conv_repo.get_conversation_for_workspace(
+                conversation_id, workspace_name, user_id=user_id
+            )
+            if conv is None:
+                raise NotFoundError("conversation", str(conversation_id))
+
+            cached = await self._cache.get(user_id, workspace_name, conversation_id)
+            if cached is not None:
+                history = cached
+            else:
+                rows = await conv_repo.load_messages(conversation_id)
+                history = [row_to_message(r) for r in rows]
+                await self._cache.set(user_id, workspace_name, conversation_id, history)
+
+            agent.restore(history, conversation_id)
+        else:
+            await agent.start_conversation(session, workspace_name, user_id=user_id)
+
+        return agent, agent.conversation_id
+
+    def _row_to_view(self, row: UserAgent) -> AgentView:
         return AgentView(
             config=AgentConfigView(
-                name=agent.config.name,
-                description=agent.config.description,
-                system_prompt=agent.config.system_prompt,
-                provider=agent.config.provider,
-                model=agent.config.model,
-                allowed_tools=list(agent.config.allowed_tools),
+                name=row.name,
+                description=row.description,
+                system_prompt=row.system_prompt,
+                provider=row.provider,
+                model=row.model,
+                allowed_tools=list(row.allowed_tools),
             ),
-            tools=agent.tools,
-            llm_info=agent.get_llm_info(),
+            tools=list(row.allowed_tools),
+            llm_info={"provider": row.provider, "model": row.model, "source": "registry"},
         )
