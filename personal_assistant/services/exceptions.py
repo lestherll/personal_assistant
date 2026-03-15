@@ -25,3 +25,17 @@ class ServiceValidationError(ServiceError):
 
     def __init__(self, message: str) -> None:
         super().__init__(message)
+
+
+class AuthError(ServiceError):
+    """Raised when authentication fails (401)."""
+
+    def __init__(self, message: str = "Authentication failed") -> None:
+        super().__init__(message)
+
+
+class ForbiddenError(ServiceError):
+    """Raised when the user lacks permission (403)."""
+
+    def __init__(self, message: str = "Forbidden") -> None:
+        super().__init__(message)

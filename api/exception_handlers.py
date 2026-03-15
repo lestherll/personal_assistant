@@ -8,6 +8,8 @@ from fastapi.responses import JSONResponse
 from api.schemas import ErrorResponse
 from personal_assistant.services.exceptions import (
     AlreadyExistsError,
+    AuthError,
+    ForbiddenError,
     NotFoundError,
     ServiceValidationError,
 )
@@ -32,6 +34,20 @@ def register_exception_handlers(app: FastAPI) -> None:
     ) -> JSONResponse:
         body = ErrorResponse(error="validation_error", detail=str(exc))
         return JSONResponse(status_code=422, content=body.model_dump())
+
+    @app.exception_handler(AuthError)
+    async def handle_auth_error(request: Request, exc: AuthError) -> JSONResponse:
+        body = ErrorResponse(error="not_authenticated", detail=str(exc))
+        return JSONResponse(
+            status_code=401,
+            content=body.model_dump(),
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    @app.exception_handler(ForbiddenError)
+    async def handle_forbidden(request: Request, exc: ForbiddenError) -> JSONResponse:
+        body = ErrorResponse(error="forbidden", detail=str(exc))
+        return JSONResponse(status_code=403, content=body.model_dump())
 
     @app.exception_handler(Exception)
     async def handle_unexpected(request: Request, exc: Exception) -> JSONResponse:

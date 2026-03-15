@@ -26,6 +26,7 @@ class ConversationService:
         session: AsyncSession | None,
         *,
         llm_override: BaseChatModel | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> tuple[Agent, uuid.UUID]:
         """Return (clone, conversation_id) for a request.
 
@@ -41,7 +42,7 @@ class ConversationService:
             template = self._get_template(workspace_name, agent_name)
             clone = template.clone(llm=llm_override)
             if session is not None:
-                new_id = await clone.start_conversation(session, workspace_name)
+                new_id = await clone.start_conversation(session, workspace_name, user_id=user_id)
             else:
                 new_id = conversation_id if conversation_id is not None else uuid.uuid4()
                 clone._conversation_id = new_id
@@ -50,7 +51,7 @@ class ConversationService:
             return clone, new_id
 
         if conversation_id is not None:
-            pooled = self._pool.get(workspace_name, agent_name, conversation_id)
+            pooled = self._pool.get(workspace_name, agent_name, conversation_id, user_id=user_id)
             if pooled is not None:
                 return pooled, conversation_id
 
@@ -62,7 +63,7 @@ class ConversationService:
 
             repo = ConversationRepository(session)
             conv = await repo.get_conversation_for_agent(
-                conversation_id, agent_name, workspace_name
+                conversation_id, agent_name, workspace_name, user_id=user_id
             )
             if conv is None:
                 raise NotFoundError("conversation", str(conversation_id))
@@ -70,27 +71,31 @@ class ConversationService:
             template = self._get_template(workspace_name, agent_name)
             clone = template.clone()
             clone.conversation_id = conversation_id  # lazy history reload on first run
-            self._pool.put(workspace_name, agent_name, conversation_id, clone)
+            self._pool.put(workspace_name, agent_name, conversation_id, clone, user_id=user_id)
             return clone, conversation_id
 
         # New conversation
         template = self._get_template(workspace_name, agent_name)
         clone = template.clone()
         if session is not None:
-            new_id = await clone.start_conversation(session, workspace_name)
+            new_id = await clone.start_conversation(session, workspace_name, user_id=user_id)
         else:
             new_id = uuid.uuid4()
             clone._conversation_id = new_id
             clone._history_loaded = True
             clone._history = []
-        self._pool.put(workspace_name, agent_name, new_id, clone)
+        self._pool.put(workspace_name, agent_name, new_id, clone, user_id=user_id)
         return clone, new_id
 
     def reset_conversation(
-        self, workspace_name: str, agent_name: str, conversation_id: uuid.UUID
+        self,
+        workspace_name: str,
+        agent_name: str,
+        conversation_id: uuid.UUID,
+        user_id: uuid.UUID | None = None,
     ) -> None:
         """Evict the clone from the pool. DB rows are kept."""
-        self._pool.evict(workspace_name, agent_name, conversation_id)
+        self._pool.evict(workspace_name, agent_name, conversation_id, user_id=user_id)
 
     def _get_template(self, workspace_name: str, agent_name: str) -> Agent:
         ws = self._orchestrator.get_workspace(workspace_name)

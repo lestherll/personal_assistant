@@ -20,19 +20,25 @@ class ConversationRepository:
     # ------------------------------------------------------------------
 
     async def create_conversation(
-        self, agent_name: str, workspace_name: str | None = None
+        self,
+        agent_name: str,
+        workspace_name: str | None = None,
+        user_id: uuid.UUID | None = None,
     ) -> Conversation:
         """Insert a new conversation row and return it."""
-        conv = Conversation(agent_name=agent_name, workspace_name=workspace_name)
+        conv = Conversation(agent_name=agent_name, workspace_name=workspace_name, user_id=user_id)
         self._session.add(conv)
         await self._session.commit()
         await self._session.refresh(conv)
         return conv
 
-    async def get_conversation(self, conversation_id: uuid.UUID) -> Conversation | None:
-        result = await self._session.execute(
-            select(Conversation).where(Conversation.id == conversation_id)
-        )
+    async def get_conversation(
+        self, conversation_id: uuid.UUID, user_id: uuid.UUID | None = None
+    ) -> Conversation | None:
+        conditions = [Conversation.id == conversation_id]
+        if user_id is not None:
+            conditions.append(Conversation.user_id == user_id)
+        result = await self._session.execute(select(Conversation).where(*conditions))
         return result.scalar_one_or_none()
 
     async def touch_conversation(self, conversation_id: uuid.UUID) -> None:
@@ -60,30 +66,34 @@ class ConversationRepository:
         conversation_id: uuid.UUID,
         agent_name: str,
         workspace_name: str,
+        user_id: uuid.UUID | None = None,
     ) -> Conversation | None:
         """Return the conversation only if it belongs to the given agent and workspace."""
-        result = await self._session.execute(
-            select(Conversation).where(
-                Conversation.id == conversation_id,
-                Conversation.agent_name == agent_name,
-                Conversation.workspace_name == workspace_name,
-            )
-        )
+        conditions = [
+            Conversation.id == conversation_id,
+            Conversation.agent_name == agent_name,
+            Conversation.workspace_name == workspace_name,
+        ]
+        if user_id is not None:
+            conditions.append(Conversation.user_id == user_id)
+        result = await self._session.execute(select(Conversation).where(*conditions))
         return result.scalar_one_or_none()
 
     async def list_conversations(
         self,
         agent_name: str,
         workspace_name: str,
+        user_id: uuid.UUID | None = None,
     ) -> list[Conversation]:
         """Return all conversations for a given agent and workspace, ordered by creation time."""
+        conditions = [
+            Conversation.agent_name == agent_name,
+            Conversation.workspace_name == workspace_name,
+        ]
+        if user_id is not None:
+            conditions.append(Conversation.user_id == user_id)
         result = await self._session.execute(
-            select(Conversation)
-            .where(
-                Conversation.agent_name == agent_name,
-                Conversation.workspace_name == workspace_name,
-            )
-            .order_by(Conversation.created_at)
+            select(Conversation).where(*conditions).order_by(Conversation.created_at)
         )
         return list(result.scalars().all())
 

@@ -431,7 +431,13 @@ async def test_list_conversations_returns_empty_without_db(
     from fastapi import FastAPI
     from httpx import ASGITransport
 
-    from api.dependencies import get_agent_service, get_db_session, get_workspace_service
+    from api.dependencies import (
+        DEV_USER,
+        get_agent_service,
+        get_current_user,
+        get_db_session,
+        get_workspace_service,
+    )
     from api.exception_handlers import register_exception_handlers
     from api.routers import agents, workspaces
 
@@ -442,6 +448,7 @@ async def test_list_conversations_returns_empty_without_db(
     app.dependency_overrides[get_workspace_service] = lambda: mock_workspace_service
     app.dependency_overrides[get_agent_service] = lambda: mock_agent_service
     app.dependency_overrides[get_db_session] = lambda: None  # No DB
+    app.dependency_overrides[get_current_user] = lambda: DEV_USER
 
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
@@ -463,7 +470,13 @@ async def test_list_conversations_returns_items(
     from httpx import ASGITransport
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from api.dependencies import get_agent_service, get_db_session, get_workspace_service
+    from api.dependencies import (
+        DEV_USER,
+        get_agent_service,
+        get_current_user,
+        get_db_session,
+        get_workspace_service,
+    )
     from api.exception_handlers import register_exception_handlers
     from api.routers import agents, workspaces
 
@@ -478,6 +491,7 @@ async def test_list_conversations_returns_items(
     app.dependency_overrides[get_workspace_service] = lambda: mock_workspace_service
     app.dependency_overrides[get_agent_service] = lambda: mock_agent_service
     app.dependency_overrides[get_db_session] = lambda: mock_db
+    app.dependency_overrides[get_current_user] = lambda: DEV_USER
 
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
@@ -515,7 +529,13 @@ async def _make_client_with_db(
     from httpx import ASGITransport
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from api.dependencies import get_agent_service, get_db_session, get_workspace_service
+    from api.dependencies import (
+        DEV_USER,
+        get_agent_service,
+        get_current_user,
+        get_db_session,
+        get_workspace_service,
+    )
     from api.exception_handlers import register_exception_handlers
     from api.routers import agents, workspaces
 
@@ -528,6 +548,7 @@ async def _make_client_with_db(
     app.dependency_overrides[get_workspace_service] = lambda: mock_workspace_service
     app.dependency_overrides[get_agent_service] = lambda: mock_agent_service
     app.dependency_overrides[get_db_session] = lambda: mock_db
+    app.dependency_overrides[get_current_user] = lambda: DEV_USER
     return httpx.AsyncClient(transport=ASGITransport(app=app), base_url="http://test")
 
 
@@ -579,7 +600,13 @@ async def test_delete_conversation_no_db_returns_404(
     from fastapi import FastAPI
     from httpx import ASGITransport
 
-    from api.dependencies import get_agent_service, get_db_session, get_workspace_service
+    from api.dependencies import (
+        DEV_USER,
+        get_agent_service,
+        get_current_user,
+        get_db_session,
+        get_workspace_service,
+    )
     from api.exception_handlers import register_exception_handlers
     from api.routers import agents, workspaces
 
@@ -590,6 +617,7 @@ async def test_delete_conversation_no_db_returns_404(
     app.dependency_overrides[get_workspace_service] = lambda: mock_workspace_service
     app.dependency_overrides[get_agent_service] = lambda: mock_agent_service
     app.dependency_overrides[get_db_session] = lambda: None
+    app.dependency_overrides[get_current_user] = lambda: DEV_USER
 
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"

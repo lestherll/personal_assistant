@@ -109,7 +109,7 @@ class TestGetOrCreateCloneNewConversation:
         mock_session = MagicMock()
         new_uuid = uuid.uuid4()
 
-        async def fake_start(self_agent, session, ws_name):
+        async def fake_start(self_agent, session, ws_name, user_id=None):
             self_agent._conversation_id = new_uuid
             self_agent._history_loaded = True
             self_agent._history = []

@@ -12,7 +12,9 @@ from fastapi import FastAPI
 from httpx import ASGITransport
 
 from api.dependencies import (
+    DEV_USER,
     get_agent_service,
+    get_current_user,
     get_db_session,
     get_provider_registry,
     get_workspace_service,
@@ -134,6 +136,7 @@ async def api_client(
     app.dependency_overrides[get_agent_service] = lambda: mock_agent_service
     app.dependency_overrides[get_db_session] = lambda: None
     app.dependency_overrides[get_provider_registry] = lambda: mock_provider_registry
+    app.dependency_overrides[get_current_user] = lambda: DEV_USER
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:

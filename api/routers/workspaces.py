@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_db_session, get_workspace_service
+from api.dependencies import CurrentUserDep, get_db_session, get_workspace_service
 from api.routers.params import WorkspaceName
 from api.schemas import WorkspaceChatResponse, WorkspaceDetailResponse, WorkspaceResponse
 from personal_assistant.services.schemas import (
@@ -27,6 +27,7 @@ DbSessionDep = Annotated[AsyncSession | None, Depends(get_db_session)]
 def create_workspace(
     body: CreateWorkspaceRequest,
     service: WorkspaceServiceDep,
+    _user: CurrentUserDep,
 ) -> WorkspaceResponse:
     view = service.create_workspace(
         name=body.name,
@@ -37,12 +38,14 @@ def create_workspace(
 
 
 @router.get("/", response_model=list[WorkspaceResponse])
-def list_workspaces(service: WorkspaceServiceDep) -> list[WorkspaceResponse]:
+def list_workspaces(service: WorkspaceServiceDep, _user: CurrentUserDep) -> list[WorkspaceResponse]:
     return [WorkspaceResponse.from_view(v) for v in service.list_workspaces()]
 
 
 @router.get("/{name}", response_model=WorkspaceDetailResponse)
-def get_workspace(name: WorkspaceName, service: WorkspaceServiceDep) -> WorkspaceDetailResponse:
+def get_workspace(
+    name: WorkspaceName, service: WorkspaceServiceDep, _user: CurrentUserDep
+) -> WorkspaceDetailResponse:
     view = service.get_workspace(name)
     return WorkspaceDetailResponse.from_view(view)
 
@@ -52,6 +55,7 @@ def update_workspace(
     name: WorkspaceName,
     body: UpdateWorkspaceRequest,
     service: WorkspaceServiceDep,
+    _user: CurrentUserDep,
 ) -> WorkspaceResponse:
     view = service.update_workspace(
         name,
@@ -62,7 +66,9 @@ def update_workspace(
 
 
 @router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_workspace(name: WorkspaceName, service: WorkspaceServiceDep) -> None:
+def delete_workspace(
+    name: WorkspaceName, service: WorkspaceServiceDep, _user: CurrentUserDep
+) -> None:
     service.delete_workspace(name)
 
 
@@ -72,6 +78,7 @@ async def workspace_chat(
     body: WorkspaceChatRequest,
     service: WorkspaceServiceDep,
     db: DbSessionDep,
+    _user: CurrentUserDep,
 ) -> WorkspaceChatResponse:
     view = await service.chat(
         workspace_name=name,
@@ -95,6 +102,7 @@ async def workspace_chat_stream(
     body: WorkspaceChatRequest,
     service: WorkspaceServiceDep,
     db: DbSessionDep,
+    _user: CurrentUserDep,
 ) -> StreamingResponse:
     token_iter, conversation_id, agent_used = await service.stream_chat(
         workspace_name=name,

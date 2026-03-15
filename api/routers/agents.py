@@ -8,7 +8,7 @@ from fastapi import APIRouter, Body, Depends, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_agent_service, get_db_session
+from api.dependencies import CurrentUserDep, get_agent_service, get_db_session
 from api.routers.params import AgentName, WorkspaceName
 from api.schemas import AgentResponse, ChatResponse, ConversationResponse
 from personal_assistant.services.agent_service import AgentService
@@ -32,6 +32,7 @@ def create_agent(
     workspace_name: WorkspaceName,
     body: CreateAgentRequest,
     service: AgentServiceDep,
+    _user: CurrentUserDep,
 ) -> AgentResponse:
     view = service.create_agent(
         workspace_name=workspace_name,
@@ -46,13 +47,18 @@ def create_agent(
 
 
 @router.get("/", response_model=list[AgentResponse])
-def list_agents(workspace_name: WorkspaceName, service: AgentServiceDep) -> list[AgentResponse]:
+def list_agents(
+    workspace_name: WorkspaceName, service: AgentServiceDep, _user: CurrentUserDep
+) -> list[AgentResponse]:
     return [AgentResponse.from_view(v) for v in service.list_agents(workspace_name)]
 
 
 @router.get("/{agent_name}", response_model=AgentResponse)
 def get_agent(
-    workspace_name: WorkspaceName, agent_name: AgentName, service: AgentServiceDep
+    workspace_name: WorkspaceName,
+    agent_name: AgentName,
+    service: AgentServiceDep,
+    _user: CurrentUserDep,
 ) -> AgentResponse:
     view = service.get_agent(workspace_name, agent_name)
     return AgentResponse.from_view(view)
@@ -64,6 +70,7 @@ def update_agent(
     agent_name: AgentName,
     body: UpdateAgentRequest,
     service: AgentServiceDep,
+    _user: CurrentUserDep,
 ) -> AgentResponse:
     view = service.update_agent(
         workspace_name,
@@ -79,7 +86,10 @@ def update_agent(
 
 @router.delete("/{agent_name}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_agent(
-    workspace_name: WorkspaceName, agent_name: AgentName, service: AgentServiceDep
+    workspace_name: WorkspaceName,
+    agent_name: AgentName,
+    service: AgentServiceDep,
+    _user: CurrentUserDep,
 ) -> None:
     service.delete_agent(workspace_name, agent_name)
 
@@ -94,6 +104,7 @@ async def chat(
     body: ChatRequest,
     service: AgentServiceDep,
     db: DbSessionDep,
+    _user: CurrentUserDep,
 ) -> ChatResponse:
     reply, conv_id = await service.run_agent(
         workspace_name,
@@ -112,6 +123,7 @@ async def chat_stream(
     body: ChatRequest,
     service: AgentServiceDep,
     db: DbSessionDep,
+    _user: CurrentUserDep,
 ) -> StreamingResponse:
     # Resolve conversation_id before streaming so errors become proper HTTP responses.
     tokens, conv_id = await service.stream_agent(
@@ -139,6 +151,7 @@ def reset_agent(
     workspace_name: WorkspaceName,
     agent_name: AgentName,
     service: AgentServiceDep,
+    _user: CurrentUserDep,
     body: ResetRequest | None = Body(default=None),
 ) -> None:
     conv_id = body.conversation_id if body is not None else None
@@ -151,6 +164,7 @@ async def list_conversations(
     agent_name: AgentName,
     service: AgentServiceDep,
     db: DbSessionDep,
+    _user: CurrentUserDep,
 ) -> list[ConversationResponse]:
     if db is None:
         return []
@@ -168,6 +182,7 @@ async def delete_conversation(
     conversation_id: uuid.UUID,
     service: AgentServiceDep,
     db: DbSessionDep,
+    _user: CurrentUserDep,
 ) -> None:
     if db is None:
         from personal_assistant.services.exceptions import NotFoundError
