@@ -106,5 +106,5 @@ async def fork_default_workspace(
             agent.config.system_prompt,
             agent.config.provider,
             agent.config.model,
-            list(agent.config.allowed_tools),
+            [t.name for t in agent._tools],
         )

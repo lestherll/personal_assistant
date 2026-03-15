@@ -326,6 +326,11 @@ class AgentService:
         return agent, agent.conversation_id
 
     def _row_to_view(self, row: UserAgent) -> AgentView:
+        allowed = set(row.allowed_tools)
+        if allowed:
+            resolved_tools = [t.name for t in self._tools if t.name in allowed]
+        else:
+            resolved_tools = [t.name for t in self._tools]
         return AgentView(
             config=AgentConfigView(
                 name=row.name,
@@ -335,6 +340,6 @@ class AgentService:
                 model=row.model,
                 allowed_tools=list(row.allowed_tools),
             ),
-            tools=list(row.allowed_tools),
+            tools=resolved_tools,
             llm_info={"provider": row.provider, "model": row.model, "source": "registry"},
         )

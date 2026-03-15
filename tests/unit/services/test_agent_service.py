@@ -264,6 +264,70 @@ class TestGetAgent:
 
 
 # ---------------------------------------------------------------------------
+# _row_to_view: tool resolution
+# ---------------------------------------------------------------------------
+
+
+class TestRowToViewToolResolution:
+    """Verify that _row_to_view resolves tools correctly."""
+
+    def _make_tool(self, name: str):
+        from unittest.mock import MagicMock
+
+        t = MagicMock()
+        t.name = name
+        return t
+
+    def _make_row(self, allowed_tools: list[str]):
+        row = MagicMock()
+        row.name = "Bot"
+        row.description = "desc"
+        row.system_prompt = "prompt"
+        row.provider = None
+        row.model = None
+        row.allowed_tools = allowed_tools
+        return row
+
+    def _make_service(self, tool_names: list[str]):
+        from personal_assistant.providers.registry import ProviderRegistry
+        from personal_assistant.services.agent_service import AgentService
+        from personal_assistant.services.conversation_cache import InMemoryConversationCache
+        from tests.unit.conftest import make_mock_provider
+
+        reg = ProviderRegistry()
+        reg.register(make_mock_provider("mock"), default=True)
+        tools = [self._make_tool(n) for n in tool_names]
+        cache = InMemoryConversationCache(max_size=8)
+        return AgentService(reg, tools=tools, cache=cache)
+
+    def test_empty_allowed_tools_returns_all_global_tools(self):
+        svc = self._make_service(["echo", "search"])
+        row = self._make_row(allowed_tools=[])
+        view = svc._row_to_view(row)
+        assert view.tools == ["echo", "search"]
+        assert view.config.allowed_tools == []
+
+    def test_explicit_allowed_tools_filters_global_tools(self):
+        svc = self._make_service(["echo", "search", "indeed"])
+        row = self._make_row(allowed_tools=["echo", "indeed"])
+        view = svc._row_to_view(row)
+        assert view.tools == ["echo", "indeed"]
+        assert view.config.allowed_tools == ["echo", "indeed"]
+
+    def test_nonexistent_allowed_tool_returns_empty(self):
+        svc = self._make_service(["echo"])
+        row = self._make_row(allowed_tools=["nonexistent"])
+        view = svc._row_to_view(row)
+        assert view.tools == []
+
+    def test_no_global_tools_returns_empty(self):
+        svc = self._make_service([])
+        row = self._make_row(allowed_tools=[])
+        view = svc._row_to_view(row)
+        assert view.tools == []
+
+
+# ---------------------------------------------------------------------------
 # CRUD: update_agent
 # ---------------------------------------------------------------------------
 
