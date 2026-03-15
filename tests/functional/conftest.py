@@ -10,7 +10,7 @@ from __future__ import annotations
 import os
 import uuid
 from collections.abc import AsyncIterator
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -70,6 +70,22 @@ async def http_client(live_server_url: str, _auth_token: str) -> AsyncIterator[h
     ) -> tuple[str, uuid.UUID]:
         return f"Mock reply from {agent_name}", conversation_id or uuid.uuid4()
 
+    async def _mock_stream_agent(
+        user_id: object,
+        workspace_name: object,
+        agent_name: object,
+        message: object,
+        *,
+        conversation_id: uuid.UUID | None,
+        session: object,
+    ) -> tuple[object, uuid.UUID]:
+        conv_id = conversation_id or uuid.uuid4()
+
+        async def _gen() -> object:
+            yield "Mock token"
+
+        return _gen(), conv_id
+
     headers = {"Authorization": f"Bearer {_auth_token}"} if _auth_token else {}
 
     with (
@@ -78,6 +94,55 @@ async def http_client(live_server_url: str, _auth_token: str) -> AsyncIterator[h
             "run_agent",
             side_effect=_mock_run_agent,
         ),
+        patch.object(
+            app.state.agent_service,
+            "stream_agent",
+            side_effect=_mock_stream_agent,
+        ),
+        patch.object(
+            app.state.workspace_service,
+            "_route",
+            new=AsyncMock(return_value="Assistant"),
+        ),
+    ):
+        async with httpx.AsyncClient(base_url=live_server_url, headers=headers) as client:
+            yield client
+
+
+@pytest.fixture
+async def http_client_realdb(
+    live_server_url: str, _auth_token: str
+) -> AsyncIterator[httpx.AsyncClient]:
+    """AsyncClient that runs the full DB stack but mocks the LangGraph factory.
+
+    Unlike ``http_client``, this fixture does NOT mock ``run_agent`` or
+    ``stream_agent``.  Real conversations and messages are written to the
+    SQLite test database.  Use this for tests that verify conversation lists,
+    agent participation, or conversation deletion.
+
+    The LangGraph ``create_agent`` factory is patched at the module level so
+    that the server thread (which shares the same process) picks up the mock.
+    """
+    from langchain_core.messages import AIMessage
+
+    from api.main import app
+
+    _usage = {"input_tokens": 5, "output_tokens": 10, "total_tokens": 15}
+    _ai_msg = AIMessage(content="Mock reply", usage_metadata=_usage)
+    _graph_result = {"messages": [_ai_msg]}
+
+    mock_graph = MagicMock()
+    mock_graph.ainvoke = AsyncMock(return_value=_graph_result)
+
+    async def _mock_astream(*args: object, **kwargs: object) -> object:
+        yield _graph_result
+
+    mock_graph.astream = _mock_astream
+
+    headers = {"Authorization": f"Bearer {_auth_token}"} if _auth_token else {}
+
+    with (
+        patch("personal_assistant.core.agent.create_agent", return_value=mock_graph),
         patch.object(
             app.state.workspace_service,
             "_route",

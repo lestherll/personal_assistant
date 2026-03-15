@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import uuid
+
 import httpx
+
+# ---------------------------------------------------------------------------
+# Workspace CRUD
+# ---------------------------------------------------------------------------
 
 
 async def test_list_workspaces_includes_default(http_client: httpx.AsyncClient) -> None:
@@ -90,6 +96,11 @@ async def test_delete_workspace(http_client: httpx.AsyncClient) -> None:
     assert response.status_code == 204
 
 
+# ---------------------------------------------------------------------------
+# Workspace chat (non-streaming)
+# ---------------------------------------------------------------------------
+
+
 async def test_workspace_chat_returns_response_shape(http_client: httpx.AsyncClient) -> None:
     response = await http_client.post(
         "/workspaces/default/chat",
@@ -131,3 +142,189 @@ async def test_workspace_chat_not_found(http_client: httpx.AsyncClient) -> None:
         json={"message": "Hello"},
     )
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Workspace chat (streaming)
+# ---------------------------------------------------------------------------
+
+
+async def test_workspace_chat_stream_returns_200(http_client: httpx.AsyncClient) -> None:
+    async with http_client.stream(
+        "POST",
+        "/workspaces/default/chat/stream",
+        json={"message": "Hello", "agent_name": "Assistant"},
+    ) as resp:
+        assert resp.status_code == 200
+        async for _ in resp.aiter_bytes():
+            pass
+
+
+async def test_workspace_chat_stream_has_headers(http_client: httpx.AsyncClient) -> None:
+    async with http_client.stream(
+        "POST",
+        "/workspaces/default/chat/stream",
+        json={"message": "Hello", "agent_name": "Assistant"},
+    ) as resp:
+        body = b""
+        async for chunk in resp.aiter_bytes():
+            body += chunk
+
+    assert resp.headers.get("x-conversation-id")
+    assert resp.headers.get("x-agent-used")
+
+
+async def test_workspace_chat_stream_sse_format(http_client: httpx.AsyncClient) -> None:
+    async with http_client.stream(
+        "POST",
+        "/workspaces/default/chat/stream",
+        json={"message": "Hello", "agent_name": "Assistant"},
+    ) as resp:
+        body = b""
+        async for chunk in resp.aiter_bytes():
+            body += chunk
+
+    text = body.decode()
+    assert "data:" in text
+    assert "data: [DONE]" in text
+
+
+async def test_workspace_chat_stream_unknown_workspace_returns_404(
+    http_client_realdb: httpx.AsyncClient,
+) -> None:
+    # Requires real service validation (stream_agent not mocked)
+    response = await http_client_realdb.post(
+        "/workspaces/nonexistent/chat/stream",
+        json={"message": "Hello", "agent_name": "Assistant"},
+    )
+
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Conversation list (Tier 1 — no DB state required)
+# ---------------------------------------------------------------------------
+
+
+async def test_list_conversations_returns_200(http_client: httpx.AsyncClient) -> None:
+    response = await http_client.get("/workspaces/default/conversations")
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+async def test_list_conversations_unknown_workspace_returns_404(
+    http_client: httpx.AsyncClient,
+) -> None:
+    response = await http_client.get("/workspaces/nonexistent/conversations")
+
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Conversation list (Tier 2 — real DB writes)
+# ---------------------------------------------------------------------------
+
+
+async def test_list_conversations_after_chat_has_entry(
+    http_client_realdb: httpx.AsyncClient,
+) -> None:
+    await http_client_realdb.post(
+        "/workspaces/default/chat",
+        json={"message": "Record this.", "agent_name": "Assistant"},
+    )
+    response = await http_client_realdb.get("/workspaces/default/conversations")
+
+    assert response.status_code == 200
+    assert len(response.json()) >= 1
+
+
+async def test_list_conversations_response_shape(
+    http_client_realdb: httpx.AsyncClient,
+) -> None:
+    await http_client_realdb.post(
+        "/workspaces/default/chat",
+        json={"message": "Check fields.", "agent_name": "Assistant"},
+    )
+    response = await http_client_realdb.get("/workspaces/default/conversations")
+
+    assert response.status_code == 200
+    convs = response.json()
+    assert len(convs) >= 1
+    first = convs[0]
+    # Verify the new schema: workspace_id is a UUID, not workspace_name string
+    assert "id" in first
+    assert "workspace_id" in first
+    assert "created_at" in first
+    assert "updated_at" in first
+    assert "workspace_name" not in first
+    uuid.UUID(first["workspace_id"])
+
+
+# ---------------------------------------------------------------------------
+# Agent participation (Tier 1 — error cases)
+# ---------------------------------------------------------------------------
+
+
+async def test_agent_participation_unknown_workspace_returns_404(
+    http_client: httpx.AsyncClient,
+) -> None:
+    random_id = str(uuid.uuid4())
+    response = await http_client.get(f"/workspaces/nonexistent/conversations/{random_id}/agents")
+
+    assert response.status_code == 404
+
+
+async def test_agent_participation_unknown_conversation_returns_404(
+    http_client: httpx.AsyncClient,
+) -> None:
+    random_id = str(uuid.uuid4())
+    response = await http_client.get(f"/workspaces/default/conversations/{random_id}/agents")
+
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Agent participation (Tier 2 — real DB writes)
+# ---------------------------------------------------------------------------
+
+
+async def test_agent_participation_after_chat_returns_list(
+    http_client_realdb: httpx.AsyncClient,
+) -> None:
+    chat = await http_client_realdb.post(
+        "/workspaces/default/chat",
+        json={"message": "Who contributed?", "agent_name": "Assistant"},
+    )
+    assert chat.status_code == 200
+    conversation_id = chat.json()["conversation_id"]
+
+    response = await http_client_realdb.get(
+        f"/workspaces/default/conversations/{conversation_id}/agents"
+    )
+
+    assert response.status_code == 200
+    assert isinstance(response.json(), list)
+
+
+async def test_agent_participation_response_shape(
+    http_client_realdb: httpx.AsyncClient,
+) -> None:
+    chat = await http_client_realdb.post(
+        "/workspaces/default/chat",
+        json={"message": "Track my agent.", "agent_name": "Assistant"},
+    )
+    conversation_id = chat.json()["conversation_id"]
+
+    response = await http_client_realdb.get(
+        f"/workspaces/default/conversations/{conversation_id}/agents"
+    )
+
+    assert response.status_code == 200
+    participants = response.json()
+    assert len(participants) >= 1
+    first = participants[0]
+    assert "agent_id" in first
+    assert "agent_name" in first
+    assert "message_count" in first
+    assert first["message_count"] >= 1
