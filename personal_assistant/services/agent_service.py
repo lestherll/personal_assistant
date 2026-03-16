@@ -205,9 +205,10 @@ class AgentService:
         resolved_ws_id: uuid.UUID = ws_row.id
 
         async def _generate() -> AsyncIterator[str]:
-            async for msg in agent.stream(message, session=session):
-                content = msg.content
-                yield content if isinstance(content, str) else str(content)
+            async for msg_chunk in agent.stream(message, session=session):
+                content = msg_chunk.content
+                if isinstance(content, str) and content:
+                    yield content
             # Update cache after stream completes
             await self._cache.set(
                 user_id,  # type: ignore[arg-type]

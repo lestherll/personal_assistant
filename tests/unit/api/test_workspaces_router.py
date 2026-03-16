@@ -324,13 +324,28 @@ async def test_workspace_chat_stream_returns_streaming_response(
     assert response.headers["x-agent-used"] == "Bot"
 
 
+async def test_workspace_chat_stream_without_agent_name_uses_supervisor(
+    api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
+) -> None:
+    async def fake_tokens():
+        yield "Routed"
+
+    mock_workspace_service.stream_chat.return_value = (fake_tokens(), "conv-456", "Bot")
+    response = await api_client.post(
+        "/workspaces/ws1/chat/stream",
+        json={"message": "help me"},
+    )
+    assert response.status_code == 200
+    assert response.headers["x-agent-used"] == "Bot"
+
+
 async def test_workspace_chat_stream_validation_error_returns_422(
     api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
 ) -> None:
     from personal_assistant.services.exceptions import ServiceValidationError
 
     mock_workspace_service.stream_chat.side_effect = ServiceValidationError(
-        "stream_chat requires agent_name"
+        "Workspace 'ws1' has no agents to route to"
     )
     response = await api_client.post("/workspaces/ws1/chat/stream", json={"message": "hello"})
     assert response.status_code == 422

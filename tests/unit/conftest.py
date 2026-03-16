@@ -4,7 +4,7 @@ from collections.abc import AsyncGenerator
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
 from personal_assistant.core.agent import Agent, AgentConfig
 from personal_assistant.providers.base import AIProvider
@@ -64,8 +64,9 @@ def make_mock_graph(response: str = "Test response") -> MagicMock:
 
     async def _astream(
         *args: object, **kwargs: object
-    ) -> AsyncGenerator[dict[str, list[HumanMessage | AIMessage]]]:
-        yield {"messages": messages}
+    ) -> AsyncGenerator[tuple[AIMessageChunk, dict[str, str]]]:
+        yield AIMessageChunk(content="Test "), {"langgraph_node": "agent"}
+        yield AIMessageChunk(content="response"), {"langgraph_node": "agent"}
 
     graph.astream = _astream
     return graph

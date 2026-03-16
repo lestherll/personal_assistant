@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain.agents import create_agent
 from langchain_core.language_models.chat_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 from langchain_core.tools import BaseTool
 
 from personal_assistant.providers.registry import ProviderRegistry
@@ -432,12 +432,29 @@ class Agent:
                 model=self.config.model,
             )
 
-        async for chunk in self._graph.astream(
+        accumulated: AIMessageChunk | None = None
+
+        async for msg_chunk, _metadata in self._graph.astream(
             {"messages": self._history},
-            stream_mode="values",
+            stream_mode="messages",
         ):
-            self._history = chunk["messages"]
-            yield self._history[-1]
+            if not isinstance(msg_chunk, AIMessageChunk):
+                continue
+            chunk_content = msg_chunk.content
+            if not isinstance(chunk_content, str) or not chunk_content:
+                continue
+            accumulated = msg_chunk if accumulated is None else accumulated + msg_chunk
+            yield msg_chunk
+
+        if accumulated is not None:
+            acc_content = accumulated.content
+            final_content = acc_content if isinstance(acc_content, str) else str(acc_content)
+            self._history.append(
+                AIMessage(
+                    content=final_content,
+                    usage_metadata=getattr(accumulated, "usage_metadata", None),
+                )
+            )
 
         # Persist the final AI message after streaming completes
         if session is not None and self._conversation_id is not None and self._history:

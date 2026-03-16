@@ -341,13 +341,42 @@ class TestChatSupervisorPath:
 
 
 class TestStreamChat:
-    async def test_requires_agent_name(self, service, user_id, mock_ws_row):
+    async def test_supervisor_path_routes_and_streams(
+        self, service, user_id, mock_ws_row, mock_agent_row, mock_agent_service
+    ):
         session = AsyncMock()
-        ws_repo = _mock_ws_repo(ws_row=mock_ws_row)
+        conv_id = uuid.uuid4()
+
+        async def fake_tokens():
+            yield "hello"
+            yield " world"
+
+        mock_agent_service.stream_agent = AsyncMock(return_value=(fake_tokens(), conv_id))
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_rows=[mock_agent_row])
 
         with (
             _patch_ws_repo(ws_repo),
-            pytest.raises(ServiceValidationError, match="requires agent_name"),
+            patch(
+                "personal_assistant.services.workspace_service.route",
+                new=AsyncMock(return_value="Bot"),
+            ),
+        ):
+            token_iter, returned_id, agent_used = await service.stream_chat(
+                user_id, "ws", "hi", session=session
+            )
+
+        assert returned_id == str(conv_id)
+        assert agent_used == "Bot"
+        tokens = [t async for t in token_iter]
+        assert tokens == ["hello", " world"]
+
+    async def test_supervisor_path_no_agents_raises(self, service, user_id, mock_ws_row):
+        session = AsyncMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_rows=[])
+
+        with (
+            _patch_ws_repo(ws_repo),
+            pytest.raises(ServiceValidationError, match="has no agents"),
         ):
             await service.stream_chat(user_id, "ws", "hi", session=session)
 

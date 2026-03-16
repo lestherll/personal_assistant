@@ -189,13 +189,16 @@ class WorkspaceService:
         model: str | None = None,
         session: AsyncSession | None = None,
     ) -> tuple[AsyncIterator[str], str, str]:
-        """Stream a response. Requires ``agent_name``; supervisor streaming is not supported."""
-        if agent_name is None:
-            raise ServiceValidationError(
-                "stream_chat requires agent_name; supervisor streaming is not supported"
-            )
-
+        """Stream a response. Uses supervisor routing when ``agent_name`` is omitted."""
         conv_uuid = self._parse_conversation_id(conversation_id)
+
+        if agent_name is None:
+            _ws_row, agent_rows = await self._get_ws_or_raise(user_id, workspace_name, session)
+            if not agent_rows:
+                raise ServiceValidationError(
+                    f"Workspace '{workspace_name}' has no agents to route to"
+                )
+            agent_name = await self._route(message, agent_rows)
 
         token_iter, returned_id = await self._agent_service.stream_agent(
             user_id,
