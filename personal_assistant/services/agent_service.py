@@ -6,6 +6,9 @@ The service is a singleton — it holds no per-user or per-request state.
 
 from __future__ import annotations
 
+import asyncio
+import collections
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
@@ -19,7 +22,10 @@ from personal_assistant.services.views import (
     AgentConfigView,
     AgentView,
     ConversationView,
+    MessageView,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from langchain_core.tools import BaseTool
@@ -47,6 +53,19 @@ class AgentService:
         self._registry = registry
         self._tools = tools
         self._cache = cache
+        self._locks: collections.OrderedDict[uuid.UUID, asyncio.Lock] = collections.OrderedDict()
+        self._max_locks = 1000
+
+    def _get_lock(self, conv_id: uuid.UUID) -> asyncio.Lock:
+        """Return (or create) a per-conversation lock, evicting the oldest if over capacity."""
+        if conv_id in self._locks:
+            self._locks.move_to_end(conv_id)
+            return self._locks[conv_id]
+        lock = asyncio.Lock()
+        self._locks[conv_id] = lock
+        while len(self._locks) > self._max_locks:
+            self._locks.popitem(last=False)
+        return lock
 
     # ------------------------------------------------------------------
     # CRUD
@@ -77,7 +96,7 @@ class AgentService:
             raise AlreadyExistsError("agent", name)
 
         agent_row = await repo.create_agent(
-            ws_row.id, name, description, system_prompt, provider, model, allowed_tools or []
+            ws_row.id, name, description, system_prompt, provider, model, allowed_tools
         )
         return self._row_to_view(agent_row)
 
@@ -136,7 +155,7 @@ class AgentService:
             system_prompt if system_prompt is not None else agent_row.system_prompt,
             provider if provider is not None else agent_row.provider,
             model if model is not None else agent_row.model,
-            allowed_tools if allowed_tools is not None else list(agent_row.allowed_tools),
+            allowed_tools if allowed_tools is not None else agent_row.allowed_tools,
         )
         return self._row_to_view(updated)
 
@@ -170,18 +189,25 @@ class AgentService:
         session: AsyncSession | None,
     ) -> tuple[str, uuid.UUID]:
         """Send a message to an agent and return ``(reply, conversation_id)``."""
-        agent, ws_row = await self._prepare_agent(
-            user_id, workspace_name, agent_name, conversation_id, session
-        )
-        result = await agent.run(message, session=session)
-        # Update cache with post-run history
-        await self._cache.set(
-            user_id,  # type: ignore[arg-type]
-            ws_row.id,
-            agent.conversation_id,  # type: ignore[arg-type]
-            agent.history,
-        )
-        return result.content, agent.conversation_id  # type: ignore[return-value]
+        lock = self._get_lock(conversation_id) if conversation_id else None
+        if lock:
+            await lock.acquire()
+        try:
+            agent, ws_row = await self._prepare_agent(
+                user_id, workspace_name, agent_name, conversation_id, session
+            )
+            result = await agent.run(message, session=session)
+            # Update cache with post-run history
+            await self._cache.set(
+                user_id,  # type: ignore[arg-type]
+                ws_row.id,
+                agent.conversation_id,  # type: ignore[arg-type]
+                agent.history,
+            )
+            return result.content, agent.conversation_id  # type: ignore[return-value]
+        finally:
+            if lock:
+                lock.release()
 
     async def stream_agent(
         self,
@@ -198,24 +224,52 @@ class AgentService:
         The conversation_id is resolved before any tokens are yielded so callers
         can surface errors as proper HTTP responses rather than SSE events.
         """
-        agent, ws_row = await self._prepare_agent(
-            user_id, workspace_name, agent_name, conversation_id, session
-        )
+        lock = self._get_lock(conversation_id) if conversation_id else None
+        if lock:
+            await lock.acquire()
+
+        try:
+            agent, ws_row = await self._prepare_agent(
+                user_id, workspace_name, agent_name, conversation_id, session
+            )
+        except BaseException:
+            if lock:
+                lock.release()
+            raise
+
         resolved_conv_id: uuid.UUID = agent.conversation_id  # type: ignore[assignment]
         resolved_ws_id: uuid.UUID = ws_row.id
 
         async def _generate() -> AsyncIterator[str]:
-            async for msg_chunk in agent.stream(message, session=session):
-                content = msg_chunk.content
-                if isinstance(content, str) and content:
-                    yield content
-            # Update cache after stream completes
-            await self._cache.set(
-                user_id,  # type: ignore[arg-type]
-                resolved_ws_id,
-                resolved_conv_id,
-                agent.history,
-            )
+            try:
+                async for msg_chunk in agent.stream(message, session=session):
+                    content = msg_chunk.content
+                    if isinstance(content, str) and content:
+                        yield content
+            except Exception:
+                logger.exception("Stream error for conversation %s", resolved_conv_id)
+                # Best-effort: save partial history so the turn isn't lost
+                try:
+                    await self._cache.set(
+                        user_id,  # type: ignore[arg-type]
+                        resolved_ws_id,
+                        resolved_conv_id,
+                        agent.history,
+                    )
+                except Exception:
+                    logger.warning("Failed to save partial history after stream error")
+                raise
+            else:
+                # Update cache after stream completes successfully
+                await self._cache.set(
+                    user_id,  # type: ignore[arg-type]
+                    resolved_ws_id,
+                    resolved_conv_id,
+                    agent.history,
+                )
+            finally:
+                if lock:
+                    lock.release()
 
         return _generate(), resolved_conv_id
 
@@ -271,6 +325,42 @@ class AgentService:
             raise NotFoundError("conversation", str(conversation_id))
 
         return await conv_repo.list_agent_participation(conversation_id)
+
+    async def get_conversation_messages(
+        self,
+        user_id: uuid.UUID | None,
+        workspace_name: str,
+        conversation_id: uuid.UUID,
+        session: AsyncSession,
+    ) -> list[MessageView]:
+        """Return all messages in a conversation, ordered by sequence."""
+        if user_id is None:
+            raise NotFoundError("workspace", workspace_name)
+
+        ws_repo = UserWorkspaceRepository(session)
+        ws_row = await ws_repo.get_workspace(user_id, workspace_name)
+        if ws_row is None:
+            raise NotFoundError("workspace", workspace_name)
+
+        conv_repo = ConversationRepository(session)
+        conv = await conv_repo.get_conversation_for_workspace(
+            conversation_id, ws_row.id, user_id=user_id
+        )
+        if conv is None:
+            raise NotFoundError("conversation", str(conversation_id))
+
+        messages = await conv_repo.load_messages(conversation_id)
+        return [
+            MessageView(
+                id=m.id,
+                conversation_id=m.conversation_id,
+                role=m.role,
+                content=m.content,
+                agent_id=m.agent_id,
+                created_at=m.created_at,
+            )
+            for m in messages
+        ]
 
     async def delete_conversation(
         self,
@@ -356,7 +446,9 @@ class AgentService:
             system_prompt=agent_row.system_prompt,
             provider=agent_row.provider,
             model=agent_row.model,
-            allowed_tools=list(agent_row.allowed_tools),
+            allowed_tools=list(agent_row.allowed_tools)
+            if agent_row.allowed_tools is not None
+            else None,
             agent_id=agent_row.id,
         )
         agent = Agent(config, self._registry, tools=self._tools)
@@ -385,8 +477,8 @@ class AgentService:
         return agent, ws_row
 
     def _row_to_view(self, row: UserAgent) -> AgentView:
-        allowed = set(row.allowed_tools)
-        if allowed:
+        if row.allowed_tools is not None:
+            allowed = set(row.allowed_tools)
             resolved_tools = [t.name for t in self._tools if t.name in allowed]
         else:
             resolved_tools = [t.name for t in self._tools]
@@ -397,7 +489,7 @@ class AgentService:
                 system_prompt=row.system_prompt,
                 provider=row.provider,
                 model=row.model,
-                allowed_tools=list(row.allowed_tools),
+                allowed_tools=list(row.allowed_tools) if row.allowed_tools is not None else None,
             ),
             tools=resolved_tools,
             llm_info={"provider": row.provider, "model": row.model, "source": "registry"},

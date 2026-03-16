@@ -37,3 +37,16 @@ async def list_provider_models(name: str, registry: RegistryDep) -> ProviderMode
         ) from None
     models = await provider.list_models()
     return ProviderModelsResponse(name=provider.name, models=models)
+
+
+@router.get("/{name}/health")
+async def provider_health(name: str, registry: RegistryDep) -> dict[str, str]:
+    """Check the health of a specific provider."""
+    try:
+        provider = registry.get(name)
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Provider '{name}' not found.",
+        ) from None
+    return await provider.health()

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
@@ -13,15 +12,18 @@ from api.dependencies import (
     get_agent_service,
     get_db_session,
     get_workspace_service,
+    rate_limit_chat,
 )
 from api.routers.params import WorkspaceName
 from api.schemas import (
     AgentParticipationResponse,
     ConversationResponse,
+    MessageResponse,
     WorkspaceChatResponse,
     WorkspaceDetailResponse,
     WorkspaceResponse,
 )
+from api.streaming import sse_event_generator
 from personal_assistant.services.agent_service import AgentService
 from personal_assistant.services.schemas import (
     CreateWorkspaceRequest,
@@ -102,7 +104,9 @@ async def delete_workspace(
     await service.delete_workspace(current_user.id, name, session=db)
 
 
-@router.post("/{name}/chat", response_model=WorkspaceChatResponse)
+@router.post(
+    "/{name}/chat", response_model=WorkspaceChatResponse, dependencies=[Depends(rate_limit_chat)]
+)
 async def workspace_chat(
     name: WorkspaceName,
     body: WorkspaceChatRequest,
@@ -127,7 +131,7 @@ async def workspace_chat(
     )
 
 
-@router.post("/{name}/chat/stream")
+@router.post("/{name}/chat/stream", dependencies=[Depends(rate_limit_chat)])
 async def workspace_chat_stream(
     name: WorkspaceName,
     body: WorkspaceChatRequest,
@@ -146,13 +150,8 @@ async def workspace_chat_stream(
         session=db,
     )
 
-    async def event_generator() -> AsyncIterator[str]:
-        async for token in token_iter:
-            yield f"data: {token}\n\n"
-        yield "data: [DONE]\n\n"
-
     return StreamingResponse(
-        event_generator(),
+        sse_event_generator(token_iter),
         media_type="text/event-stream",
         headers={
             "X-Conversation-Id": conversation_id,
@@ -190,3 +189,33 @@ async def list_conversation_agents(
         return []
     views = await agent_service.list_agent_participation(current_user.id, name, conversation_id, db)
     return [AgentParticipationResponse.from_view(v) for v in views]
+
+
+@router.get(
+    "/{name}/conversations/{conversation_id}/messages",
+    response_model=list[MessageResponse],
+)
+async def list_conversation_messages(
+    name: WorkspaceName,
+    conversation_id: uuid.UUID,
+    agent_service: AgentServiceDep,
+    db: DbSessionDep,
+    current_user: CurrentUserDep,
+) -> list[MessageResponse]:
+    """Return all messages in a conversation, ordered by sequence."""
+    if db is None:
+        return []
+    views = await agent_service.get_conversation_messages(
+        current_user.id, name, conversation_id, db
+    )
+    return [
+        MessageResponse(
+            id=v.id,
+            conversation_id=v.conversation_id,
+            role=v.role,
+            content=v.content,
+            agent_id=v.agent_id,
+            created_at=v.created_at,
+        )
+        for v in views
+    ]

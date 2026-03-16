@@ -67,7 +67,7 @@ def mock_agent_row(mock_ws_row):
     row.system_prompt = "Be helpful."
     row.provider = None
     row.model = None
-    row.allowed_tools = []
+    row.allowed_tools = None
     return row
 
 
@@ -217,7 +217,7 @@ class TestListAgents:
         second_row.system_prompt = "y"
         second_row.provider = None
         second_row.model = None
-        second_row.allowed_tools = []
+        second_row.allowed_tools = None
 
         ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_rows=[mock_agent_row, second_row])
 
@@ -301,11 +301,18 @@ class TestRowToViewToolResolution:
         cache = InMemoryConversationCache(max_size=8)
         return AgentService(reg, tools=tools, cache=cache)
 
-    def test_empty_allowed_tools_returns_all_global_tools(self):
+    def test_none_allowed_tools_returns_all_global_tools(self):
+        svc = self._make_service(["echo", "search"])
+        row = self._make_row(allowed_tools=None)
+        view = svc._row_to_view(row)
+        assert view.tools == ["echo", "search"]
+        assert view.config.allowed_tools is None
+
+    def test_empty_allowed_tools_returns_no_tools(self):
         svc = self._make_service(["echo", "search"])
         row = self._make_row(allowed_tools=[])
         view = svc._row_to_view(row)
-        assert view.tools == ["echo", "search"]
+        assert view.tools == []
         assert view.config.allowed_tools == []
 
     def test_explicit_allowed_tools_filters_global_tools(self):
@@ -323,7 +330,7 @@ class TestRowToViewToolResolution:
 
     def test_no_global_tools_returns_empty(self):
         svc = self._make_service([])
-        row = self._make_row(allowed_tools=[])
+        row = self._make_row(allowed_tools=None)
         view = svc._row_to_view(row)
         assert view.tools == []
 
@@ -342,7 +349,7 @@ class TestUpdateAgent:
         updated_row.system_prompt = "New prompt."
         updated_row.provider = None
         updated_row.model = None
-        updated_row.allowed_tools = []
+        updated_row.allowed_tools = None
 
         ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
         ws_repo.upsert_agent = AsyncMock(return_value=updated_row)
@@ -619,3 +626,208 @@ class TestDeleteConversation:
 
         with _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo), pytest.raises(NotFoundError):
             await service.delete_conversation(user_id, "ws", uuid.uuid4(), session=session)
+
+
+# ---------------------------------------------------------------------------
+# get_conversation_messages
+# ---------------------------------------------------------------------------
+
+
+class TestGetConversationMessages:
+    async def test_returns_messages(self, service, user_id, mock_ws_row):
+        session = AsyncMock()
+        conv_id = uuid.uuid4()
+        conv = _make_mock_conv(conv_id=conv_id, workspace_id=mock_ws_row.id, user_id=user_id)
+
+        msg = MagicMock()
+        msg.id = uuid.uuid4()
+        msg.conversation_id = conv_id
+        msg.role = "human"
+        msg.content = "hello"
+        msg.agent_id = None
+        msg.created_at = datetime.now(UTC)
+
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row)
+        conv_repo = _mock_conv_repo(conv=conv, messages=[msg])
+
+        with _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo):
+            views = await service.get_conversation_messages(user_id, "ws", conv_id, session=session)
+
+        assert len(views) == 1
+        assert views[0].content == "hello"
+        assert views[0].role == "human"
+
+    async def test_not_found_raises(self, service, user_id, mock_ws_row):
+        session = AsyncMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row)
+        conv_repo = _mock_conv_repo(conv=None)
+
+        with _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo), pytest.raises(NotFoundError):
+            await service.get_conversation_messages(user_id, "ws", uuid.uuid4(), session=session)
+
+
+# ---------------------------------------------------------------------------
+# stream_agent: error handling in _generate()
+# ---------------------------------------------------------------------------
+
+
+def _make_failing_graph():
+    """Build a mock graph whose astream raises after one chunk."""
+    from langchain_core.messages import AIMessageChunk
+
+    graph = MagicMock()
+    graph.ainvoke = AsyncMock(return_value={"messages": [AIMessage(content="ok")]})
+
+    async def _astream(*args, **kwargs):
+        yield AIMessageChunk(content="partial"), {"langgraph_node": "agent"}
+        raise RuntimeError("provider exploded")
+
+    graph.astream = _astream
+    return graph
+
+
+class TestStreamAgentErrorHandling:
+    async def test_error_propagates_from_generate(
+        self, service, user_id, mock_ws_row, mock_agent_row
+    ):
+        """Exception in agent.stream() propagates through _generate()."""
+        session = AsyncMock()
+        conv = _make_mock_conv(workspace_id=mock_ws_row.id, user_id=user_id)
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+        conv_repo = _mock_conv_repo(conv=conv)
+
+        failing_graph = _make_failing_graph()
+        with (
+            patch("personal_assistant.core.agent.create_agent", return_value=failing_graph),
+            _patch_ws_repo(ws_repo),
+            _patch_conv_repo(conv_repo),
+        ):
+            tokens, _conv_id = await service.stream_agent(
+                user_id, "ws", "Bot", "Hello", conversation_id=None, session=session
+            )
+            with pytest.raises(RuntimeError, match="provider exploded"):
+                async for _ in tokens:
+                    pass
+
+    async def test_cache_set_attempted_on_stream_error(
+        self, service, user_id, mock_ws_row, mock_agent_row, cache
+    ):
+        """On stream error, _generate() should still attempt to save partial history to cache."""
+        session = AsyncMock()
+        conv = _make_mock_conv(workspace_id=mock_ws_row.id, user_id=user_id)
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+        conv_repo = _mock_conv_repo(conv=conv)
+
+        failing_graph = _make_failing_graph()
+        with (
+            patch("personal_assistant.core.agent.create_agent", return_value=failing_graph),
+            _patch_ws_repo(ws_repo),
+            _patch_conv_repo(conv_repo),
+        ):
+            tokens, conv_id = await service.stream_agent(
+                user_id, "ws", "Bot", "Hello", conversation_id=None, session=session
+            )
+            with pytest.raises(RuntimeError):
+                async for _ in tokens:
+                    pass
+
+        # Cache should have the partial history (at minimum the human message)
+        cached = await cache.get(user_id, mock_ws_row.id, conv_id)
+        assert cached is not None
+        assert len(cached) >= 1  # At least the HumanMessage was added
+
+
+# ---------------------------------------------------------------------------
+# Concurrent chat lock
+# ---------------------------------------------------------------------------
+
+
+class TestConcurrentChatLock:
+    async def test_concurrent_run_agent_serialized(
+        self, service, user_id, mock_ws_row, mock_agent_row, cache
+    ):
+        """Two concurrent run_agent calls on the same conversation_id are serialized."""
+        import asyncio
+
+        session = AsyncMock()
+        conv_id = uuid.uuid4()
+        conv = _make_mock_conv(conv_id=conv_id, workspace_id=mock_ws_row.id, user_id=user_id)
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+        conv_repo = _mock_conv_repo(conv=conv)
+
+        call_order: list[str] = []
+        original_graph = _make_mock_graph("ok")
+
+        async def slow_ainvoke(*args, **kwargs):
+            call_order.append("start")
+            await asyncio.sleep(0.05)
+            call_order.append("end")
+            return original_graph.ainvoke.return_value
+
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(side_effect=slow_ainvoke)
+
+        with (
+            patch("personal_assistant.core.agent.create_agent", return_value=mock_graph),
+            _patch_ws_repo(ws_repo),
+            _patch_conv_repo(conv_repo),
+        ):
+            await asyncio.gather(
+                service.run_agent(
+                    user_id, "ws", "Bot", "msg1", conversation_id=conv_id, session=session
+                ),
+                service.run_agent(
+                    user_id, "ws", "Bot", "msg2", conversation_id=conv_id, session=session
+                ),
+            )
+
+        # Serialized: start-end-start-end (not start-start-end-end)
+        assert call_order == ["start", "end", "start", "end"]
+
+    async def test_lock_released_on_error(self, service, user_id, mock_ws_row, mock_agent_row):
+        """Lock is released even if run_agent raises."""
+        conv_id = uuid.uuid4()
+        conv = _make_mock_conv(conv_id=conv_id, workspace_id=mock_ws_row.id, user_id=user_id)
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+        conv_repo = _mock_conv_repo(conv=conv)
+
+        # Graph whose ainvoke raises (not just astream)
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(side_effect=RuntimeError("provider exploded"))
+        session = AsyncMock()
+
+        with (
+            patch("personal_assistant.core.agent.create_agent", return_value=mock_graph),
+            _patch_ws_repo(ws_repo),
+            _patch_conv_repo(conv_repo),
+        ):
+            with pytest.raises(RuntimeError):
+                await service.run_agent(
+                    user_id, "ws", "Bot", "msg", conversation_id=conv_id, session=session
+                )
+
+        # Lock should be released — not locked
+        lock = service._get_lock(conv_id)
+        assert not lock.locked()
+
+    async def test_no_lock_for_new_conversation(
+        self, service, user_id, mock_ws_row, mock_agent_row
+    ):
+        """No lock contention when conversation_id is None (new conversations)."""
+        session = AsyncMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_row=mock_agent_row)
+        new_conv = _make_mock_conv(workspace_id=mock_ws_row.id, user_id=user_id)
+        conv_repo = _mock_conv_repo(conv=new_conv)
+
+        mock_graph = _make_mock_graph("ok")
+        with (
+            patch("personal_assistant.core.agent.create_agent", return_value=mock_graph),
+            _patch_ws_repo(ws_repo),
+            _patch_conv_repo(conv_repo),
+        ):
+            _, conv_id = await service.run_agent(
+                user_id, "ws", "Bot", "msg", conversation_id=None, session=session
+            )
+
+        # No lock should have been created for None conversation_id
+        assert conv_id not in service._locks or not service._locks[conv_id].locked()

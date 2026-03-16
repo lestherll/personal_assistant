@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import AsyncIterator
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import CurrentUserDep, get_agent_service, get_db_session
+from api.dependencies import CurrentUserDep, get_agent_service, get_db_session, rate_limit_chat
 from api.routers.params import AgentName, WorkspaceName
 from api.schemas import AgentResponse, ChatResponse, ConversationResponse
+from api.streaming import sse_event_generator
 from personal_assistant.services.agent_service import AgentService
 from personal_assistant.services.schemas import (
     ChatRequest,
@@ -106,7 +106,9 @@ async def delete_agent(
     await service.delete_agent(current_user.id, workspace_name, agent_name, session=db)
 
 
-@router.post("/{agent_name}/chat", response_model=ChatResponse)
+@router.post(
+    "/{agent_name}/chat", response_model=ChatResponse, dependencies=[Depends(rate_limit_chat)]
+)
 async def chat(
     workspace_name: WorkspaceName,
     agent_name: AgentName,
@@ -126,7 +128,7 @@ async def chat(
     return ChatResponse(reply=reply, conversation_id=conv_id)
 
 
-@router.post("/{agent_name}/chat/stream")
+@router.post("/{agent_name}/chat/stream", dependencies=[Depends(rate_limit_chat)])
 async def chat_stream(
     workspace_name: WorkspaceName,
     agent_name: AgentName,
@@ -144,13 +146,8 @@ async def chat_stream(
         session=db,
     )
 
-    async def event_generator() -> AsyncIterator[str]:
-        async for token in tokens:
-            yield f"data: {token}\n\n"
-        yield "data: [DONE]\n\n"
-
     return StreamingResponse(
-        event_generator(),
+        sse_event_generator(tokens),
         media_type="text/event-stream",
         headers={"X-Conversation-Id": str(conv_id)},
     )

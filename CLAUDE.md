@@ -52,12 +52,14 @@ personal_assistant/
 │   └── default_workspace.py  # Factory: wires default agents + tools into a workspace
 ├── auth/
 │   ├── __init__.py       # package marker
+│   ├── api_keys.py       # generate_api_key / hash_api_key / verify_api_key (SHA-256)
 │   ├── password.py       # hash_password / verify_password (pwdlib + Argon2)
 │   └── tokens.py         # create_access_token / create_refresh_token / decode_token (PyJWT HS256)
 ├── persistence/
 │   ├── database.py       # build_engine / build_session_factory (async SQLAlchemy)
-│   ├── models.py         # ORM models: User, UserWorkspace, UserAgent, Conversation, Message
+│   ├── models.py         # ORM models: User, UserWorkspace, UserAgent, UserAPIKey, Conversation, Message
 │   ├── repository.py     # ConversationRepository — data-access layer
+│   ├── api_key_repository.py         # APIKeyRepository — CRUD for UserAPIKey records
 │   ├── user_repository.py            # UserRepository — CRUD for User records
 │   └── user_workspace_repository.py  # UserWorkspaceRepository — CRUD + upsert for UserWorkspace/UserAgent
 └── services/
@@ -70,14 +72,16 @@ personal_assistant/
     └── exceptions.py                   # NotFoundError, AlreadyExistsError, ServiceValidationError, AuthError, ForbiddenError
 api/
 ├── main.py               # FastAPI app — lifespan bootstrap, singleton services, router registration
-├── dependencies.py       # FastAPI dependency injection (auth, session factory, service singletons)
+├── dependencies.py       # FastAPI dependency injection (auth, session factory, service singletons, rate limiting)
 ├── exception_handlers.py # Maps service exceptions to HTTP responses; catch-all 500 for unexpected errors
-├── schemas.py            # API-level Pydantic request/response schemas (including auth schemas)
+├── schemas.py            # API-level Pydantic request/response schemas (including auth + API key schemas)
+├── streaming.py          # sse_event_generator() — shared SSE wrapper with [DONE]/[ERROR] sentinels
+├── rate_limit.py         # RateLimiter — fixed-window per-user rate limiting
 └── routers/
-    ├── auth.py           # /auth/** endpoints (register, login, refresh)
+    ├── auth.py           # /auth/** endpoints (register, login, refresh, API key CRUD)
     ├── agents.py         # /agents/** endpoints (including conversation list/delete)
-    ├── workspaces.py     # /workspaces/** endpoints (chat + streaming)
-    ├── providers.py      # /providers/** endpoints (discovery)
+    ├── workspaces.py     # /workspaces/** endpoints (chat, streaming, conversations, messages)
+    ├── providers.py      # /providers/** endpoints (discovery + health check)
     ├── health.py         # GET /health — liveness probe
     └── params.py         # Reusable annotated Path params (WorkspaceName, AgentName)
 tests/
@@ -99,6 +103,8 @@ tests/
         ├── test_chat.py            # Evaluation tests for agent chat endpoints
         └── test_workspace_chat.py  # Evaluation tests for workspace chat endpoint
 main.py                       # REPL entry point — bootstraps registry, orchestrator
+Dockerfile                    # Python 3.13-slim + uv, uvicorn entrypoint, healthcheck
+docker-compose.yml            # app + postgres + alembic migrate services
 ```
 
 ## Key Concepts
@@ -110,7 +116,7 @@ main.py                       # REPL entry point — bootstraps registry, orches
 `personal_assistant/bootstrap.py` exports `build_registry() -> ProviderRegistry`, which registers `AnthropicProvider` and `OllamaProvider` (set as default, model `qwen2.5:14b`). Both `main.py` (REPL) and `api/main.py` call this function — do not duplicate registration elsewhere.
 
 ### Providers
-Registered in a `ProviderRegistry` by name. Each provider wraps a LangChain chat model and exposes `get_model(model, **kwargs)` and `async list_models() -> list[str]`. The default `list_models()` implementation returns `[default_model]`; concrete providers override it to return the full set of supported models (`AnthropicProvider` returns a hardcoded list; `OllamaProvider` queries the local `/api/tags` endpoint and falls back to `[default_model]` on error). Add new providers by subclassing `AIProvider`.
+Registered in a `ProviderRegistry` by name. Each provider wraps a LangChain chat model and exposes `get_model(model, **kwargs)`, `async list_models() -> list[str]`, and `async health() -> dict[str, str]`. The default `list_models()` implementation returns `[default_model]`; concrete providers override it to return the full set of supported models (`AnthropicProvider` returns a hardcoded list; `OllamaProvider` queries the local `/api/tags` endpoint and falls back to `[default_model]` on error). The default `health()` returns `{"status": "ok"}`; `OllamaProvider` overrides it to check `/api/tags` reachability. Add new providers by subclassing `AIProvider`.
 
 ### Agents
 Created from `AgentConfig` (name, description, system_prompt, provider, model, allowed_tools). Maintain their own conversation history across turns. Rebuilt automatically when tools are added/removed.
@@ -126,7 +132,7 @@ Created from `AgentConfig` (name, description, system_prompt, provider, model, a
 | `system_prompt` | `str` | LLM system message |
 | `provider` | `str \| None` | Registry key; `None` → registry default |
 | `model` | `str \| None` | Model name; `None` → provider default |
-| `allowed_tools` | `list[str]` | Tool names this agent may use |
+| `allowed_tools` | `list[str] \| None` | `None` = all tools, `[]` = no tools, explicit list = allowlist |
 
 ### Workspaces
 Named containers for agents and tools. Tools added to a workspace are auto-registered with all compatible agents. Supports `add_agent`, `remove_agent`, `replace_agent`, `add_tool`, `remove_tool`. Each workspace owns a `WorkspaceSupervisor` that routes workspace-level chat to the most suitable agent.
@@ -144,14 +150,22 @@ Named containers for agents and tools. Tools added to a workspace are auto-regis
 Falls back to the first available agent if the LLM's routing decision is invalid.
 
 ### Authentication
-Stateless JWT auth built on `pwdlib` (Argon2 hashing) and `PyJWT` (HS256 tokens).
+Stateless JWT auth built on `pwdlib` (Argon2 hashing) and `PyJWT` (HS256 tokens), with optional API key authentication.
 
 - `auth/password.py` — `hash_password` / `verify_password`
 - `auth/tokens.py` — `create_access_token(sub)`, `create_refresh_token(sub)`, `decode_token(token)`. Raises `AuthError` on expired/invalid tokens.
+- `auth/api_keys.py` — `generate_api_key()`, `hash_api_key(key)`, `verify_api_key(key, hash)`. Uses SHA-256 (not Argon2) for high-entropy API keys, with `hmac.compare_digest` for timing-safe comparison.
 - `services/auth_service.py` — `AuthService`: `register`, `login`, `refresh`, `get_user_from_token`. `fork_default_workspace` is a helper called during registration to copy the global default workspace into the new user's DB rows.
-- `api/dependencies.py` — `get_current_user` resolves the `User` from the `Authorization: Bearer` token. When `AUTH_DISABLED=true`, it returns a fixed `DEV_USER` sentinel (id=`UUID(int=0)`, username=`"dev"`) without touching the DB. `CurrentUserDep = Annotated[User, Depends(get_current_user)]` is imported by all routers.
+- `api/dependencies.py` — `get_current_user` resolves the `User` from the `Authorization: Bearer` token. Tokens starting with `sk-` are treated as API keys (hashed and looked up in DB); all others go through the JWT path. When `AUTH_DISABLED=true`, it returns a fixed `DEV_USER` sentinel (id=`UUID(int=0)`, username=`"dev"`) without touching the DB. `CurrentUserDep = Annotated[User, Depends(get_current_user)]` is imported by all routers.
+- **API keys:** Created via `POST /auth/api-keys`, listed via `GET /auth/api-keys`, revoked via `DELETE /auth/api-keys/{id}`. Keys are stored as SHA-256 hashes in the `user_api_keys` table. The raw key is shown once on creation and never stored.
 - **Dev bypass:** Set `AUTH_DISABLED=true` in `.env` to skip all auth. `DATABASE_URL` is then optional and the app runs fully in-memory as the `dev` user.
 - **DB required:** When `AUTH_DISABLED=false` (default), the app will refuse to start without `DATABASE_URL`.
+
+### Rate Limiting
+Per-user rate limiting is enforced on all chat endpoints via a `rate_limit_chat` FastAPI dependency. Uses a fixed-window algorithm with an in-memory dict (`api/rate_limit.py`). Default: 60 requests per 60 seconds. Returns HTTP 429 with `Retry-After` header when exceeded. The `RateLimiter` singleton is created in the app lifespan and stored on `app.state`.
+
+### SSE Streaming
+`api/streaming.py` provides `sse_event_generator(token_iter)` — a shared async generator that wraps any token iterator with SSE formatting (`data: {token}\n\n`), emits `data: [DONE]\n\n` on clean completion, and emits `data: [ERROR]\n\n` on exception. Used by both agent and workspace streaming endpoints.
 
 ### ConversationCache
 `ConversationCache` (`services/conversation_cache.py`) is an abstract pluggable caching layer for conversation message histories, keyed by `(user_id, workspace_name, conversation_id)`. Methods: `get`, `set`, `invalidate`.
@@ -200,8 +214,12 @@ FastAPI app in `api/`. Singleton `AgentService` and `WorkspaceService` are creat
 | `POST` | `/auth/register` | Register a new user | No |
 | `POST` | `/auth/login` | Log in, receive access + refresh tokens | No |
 | `POST` | `/auth/refresh` | Refresh access token | No |
+| `POST` | `/auth/api-keys` | Create an API key | Yes |
+| `GET` | `/auth/api-keys` | List API keys for the current user | Yes |
+| `DELETE` | `/auth/api-keys/{id}` | Revoke an API key | Yes |
 | `GET` | `/providers/` | List all registered providers | Yes |
 | `GET` | `/providers/{name}/models` | List available models for a provider | Yes |
+| `GET` | `/providers/{name}/health` | Provider health check | Yes |
 | `POST` | `/workspaces/` | Create a workspace | Yes |
 | `GET` | `/workspaces/` | List workspaces for the current user | Yes |
 | `GET` | `/workspaces/{workspace_name}` | Get workspace details | Yes |
@@ -216,11 +234,13 @@ FastAPI app in `api/`. Singleton `AgentService` and `WorkspaceService` are creat
 | `DELETE` | `/workspaces/{workspace_name}/agents/{agent_name}` | Delete an agent | Yes |
 | `POST` | `/workspaces/{workspace_name}/agents/{agent_name}/chat` | Non-streaming agent chat | Yes |
 | `POST` | `/workspaces/{workspace_name}/agents/{agent_name}/chat/stream` | Streaming agent chat (SSE) | Yes |
+| `GET` | `/workspaces/{workspace_name}/conversations` | List conversations in a workspace | Yes |
+| `GET` | `/workspaces/{workspace_name}/conversations/{id}/messages` | Get conversation message history | Yes |
 | `GET` | `/workspaces/{workspace_name}/agents/{agent_name}/conversations` | List conversations (requires DB) | Yes |
 | `DELETE` | `/workspaces/{workspace_name}/agents/{agent_name}/conversations/{id}` | Delete a conversation (requires DB) | Yes |
 
 ### Persistence
-Async SQLAlchemy + asyncpg backed by PostgreSQL. ORM models live in `persistence/models.py`: `User`, `UserWorkspace`, `UserAgent`, `Conversation`, `Message`. Set `DATABASE_URL` to enable; omit it only when `AUTH_DISABLED=true` (in-memory dev mode). Use Alembic for migrations (`uv run alembic upgrade head`).
+Async SQLAlchemy + asyncpg backed by PostgreSQL. ORM models live in `persistence/models.py`: `User`, `UserWorkspace`, `UserAgent`, `UserAPIKey`, `Conversation`, `Message`. Set `DATABASE_URL` to enable; omit it only when `AUTH_DISABLED=true` (in-memory dev mode). Use Alembic for migrations (`uv run alembic upgrade head`).
 
 ### Evaluation (optional)
 DeepEval-based evaluation tests in `tests/evaluation/api/`. Tests use an Ollama-backed judge model (`qwen2.5:14b`) to evaluate LLM responses for relevancy, correctness, and toxicity. Run with `uv run pytest -m evaluation tests/evaluation/` (requires local Ollama at `http://localhost:11434`). Use `timeout=120.0` for LLM-backed requests.
@@ -253,6 +273,8 @@ uv run ruff check .                            # Lint
 uv run ruff format .                           # Format
 uv run mypy . --exclude tests                  # Type-check
 uv run alembic upgrade head                    # Apply DB migrations
+docker compose build                           # Build Docker image
+docker compose up -d                           # Start app + postgres (detached)
 ```
 
 ## Conventions

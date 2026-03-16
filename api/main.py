@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from langchain_core.tools import BaseTool
 
 from api.exception_handlers import register_exception_handlers
+from api.rate_limit import RateLimiter
 from api.routers import agents, auth, health, providers, workspaces
 from personal_assistant.bootstrap import build_registry
 from personal_assistant.config import get_settings
@@ -48,6 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     workspace_service = WorkspaceService(registry, agent_service)
     app.state.agent_service = agent_service
     app.state.workspace_service = workspace_service
+    app.state.rate_limiter = RateLimiter(max_requests=60, window_seconds=60)
 
     # --- Persistence (optional) ---
     engine = None

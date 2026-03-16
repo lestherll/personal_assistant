@@ -5,69 +5,42 @@ Items are grouped by theme and ordered P0 → P3 within each group.
 
 ---
 
-## Critical fixes (P0)
+## Critical fixes (P0) — DONE
 
-### Stream error sentinel
-**What:** Wrap `_generate()` in `AgentService.stream_agent` with a `try/except` that emits `data: [ERROR]\n\n` on failure before the generator exits.
-**Why:** Any exception mid-stream (timeout, provider 500, tool crash) currently produces a truncated SSE response with no `[DONE]`. Clients cannot distinguish a clean finish from a crash — they hang waiting for a sentinel that never arrives. Conversation history write is also skipped, losing the partial turn.
-**Where:** `personal_assistant/services/agent_service.py` → `stream_agent._generate()`
-**Effort:** S | **Priority:** P0
+### ~~Stream error sentinel~~ ✓
+Implemented: SSE helper in `api/streaming.py` with `[DONE]`/`[ERROR]` sentinels + service-layer error handling in `_generate()`.
 
-### LLM retry on transient errors
-**What:** Wrap the resolved LLM in `personal_assistant/core/agent.py` with `llm.with_retry(stop_after_attempt=3)` to handle provider 429s and transient 5xxs.
-**Why:** Provider errors are transient — a single retry after 1-2 seconds succeeds the vast majority of the time. Right now any LLM-level error immediately returns a 500 to the user.
-**Where:** `personal_assistant/core/agent.py` → wherever `get_model()` result is stored on the agent
-**Effort:** S | **Priority:** P0
+### ~~LLM retry on transient errors~~ ✓
+Implemented: `with_retry(stop_after_attempt=3)` in `Agent._build_graph()`.
 
 ---
 
-## Security & correctness (P1)
+## Security & correctness (P1) — DONE
 
-### Fix `allowed_tools` semantics
-**What:** Change the meaning of `allowed_tools` so that `None`/`null` = all tools allowed, `[]` = no tools, `["tool_a"]` = explicit allowlist. Requires one Alembic migration to convert existing empty-array rows to `NULL`.
-**Why:** The current `[] = all tools` semantic is a hidden footgun — an empty list intuitively means "none", not "everything". As the tool management system is built, `allowed_tools` becomes a real security boundary, not just a config hint. Fixing the semantics now prevents a breaking change later.
-**Where:** `personal_assistant/persistence/models.py`, `personal_assistant/services/agent_service.py` (`_row_to_view`), new Alembic migration
-**Effort:** S | **Priority:** P1
+### ~~Fix `allowed_tools` semantics~~ ✓
+Implemented: `None` = all tools, `[]` = no tools, explicit list = allowlist. Alembic migration 0009.
 
-### API key system
-**What:** Long-lived, revocable API keys (`sk-...` style) as an alternative to JWT for programmatic access. New `UserAPIKey` DB table with hashed key, name, created/last-used timestamps, optional expiry. Endpoints: `POST /auth/api-keys`, `GET /auth/api-keys`, `DELETE /auth/api-keys/{id}`. Auth middleware checks `Authorization: Bearer` for both JWT and API key (raw key hashed on each request, compared against stored hash).
-**Why:** JWT is right for browser sessions but painful for scripts and integrations — tokens expire, refresh flows are awkward, you can't put a JWT in a `.env` file. API keys are what developers expect.
-**Where:** New `persistence/models.py` table, `auth/tokens.py` or new `auth/api_keys.py`, `api/dependencies.py` (`get_current_user`), `api/routers/auth.py`
-**Effort:** M | **Priority:** P1
+### ~~API key system~~ ✓
+Implemented: `UserAPIKey` model, SHA-256 hashing, `sk-` prefix detection in `get_current_user`, CRUD endpoints at `/auth/api-keys`.
 
-### Per-user rate limiting on chat endpoints
-**What:** Middleware that enforces a per-user request-per-minute cap on the chat endpoints (`/agents/{a}/chat`, `/agents/{a}/chat/stream`, `/workspaces/{w}/chat`, `/workspaces/{w}/chat/stream`). Returns HTTP 429 with `Retry-After` header when the limit is exceeded.
-**Why:** LLM calls are expensive. An unthrottled user can run up unbounded API costs and degrade response times for everyone. A simple sliding-window limiter prevents worst-case abuse.
-**Where:** `api/main.py` (middleware registration), new `api/middleware/rate_limit.py`. Start with in-memory (single-process); replace with Redis when cache is upgraded.
-**Effort:** M | **Priority:** P1
+### ~~Per-user rate limiting on chat endpoints~~ ✓
+Implemented: Fixed-window `RateLimiter` as FastAPI dependency on all chat endpoints.
 
-### Concurrent chat race condition
-**What:** Two simultaneous requests using the same `conversation_id` both load history at `t=0`, both append their messages, and the last writer wins — silently discarding the first turn from history. Fix with a per-`conversation_id` `asyncio.Lock` in `AgentService`.
-**Why:** Happens on double-submit, client retry of a slow request, or any client that doesn't wait for a response before sending the next message. The corrupted history is invisible — the agent simply won't remember the dropped turn.
-**Where:** `personal_assistant/services/agent_service.py` → `_prepare_agent` / `run_agent` / `stream_agent`. In-memory lock is sufficient for single-process; replace with Redis lock when the cache is upgraded.
-**Effort:** M | **Priority:** P2 (P1 once multi-user load increases)
+### ~~Concurrent chat race condition~~ ✓
+Implemented: Per-conversation `asyncio.Lock` in `AgentService` with bounded LRU eviction.
 
 ---
 
 ## API completeness (P1–P2)
 
-### Cross-workspace conversation list
-**What:** `GET /workspaces/{workspace_name}/conversations` — list all conversations in a workspace across all agents, not just per-agent.
-**Why:** The `Conversation` model is scoped to `workspace_id`, not `agent_id`. The data already supports a unified view. Without this endpoint, a chat UI sidebar cannot show a complete conversation history — it would have to query every agent separately.
-**Where:** `api/routers/workspaces.py`, `personal_assistant/services/agent_service.py` (or new `WorkspaceService` method), `personal_assistant/persistence/repository.py`
-**Effort:** S | **Priority:** P1
+### ~~Cross-workspace conversation list~~ ✓
+Already built at `GET /workspaces/{name}/conversations`.
 
-### Conversation message history endpoint
-**What:** `GET /workspaces/{workspace_name}/conversations/{conversation_id}/messages` — retrieve the messages of a past conversation.
-**Why:** Conversation history is currently write-only from the API's perspective. The agent uses it internally but no client can display a conversation replay. For any chat UI, this is essential: users need to re-open a past conversation and see what was said.
-**Where:** `api/routers/workspaces.py`, `personal_assistant/services/agent_service.py`, `personal_assistant/persistence/repository.py`
-**Effort:** S | **Priority:** P1
+### ~~Conversation message history endpoint~~ ✓
+Implemented: `GET /workspaces/{name}/conversations/{conversation_id}/messages`.
 
-### Provider health check endpoint
-**What:** `GET /providers/{name}/health` — a liveness check for a registered provider. For Ollama: hits `/api/tags` (already used in `list_models()`). For Anthropic: a minimal API call. Returns `{"status": "ok"}` or `{"status": "error", "detail": "..."}`.
-**Why:** The most common debugging question is "why isn't my agent responding?" — is it the app or the provider? This endpoint answers it immediately. Also enables a meaningful docker-compose `healthcheck`.
-**Where:** `personal_assistant/providers/base.py` (new `health()` abstract method), `providers/anthropic.py`, `providers/ollama.py`, `api/routers/providers.py`
-**Effort:** S | **Priority:** P1
+### ~~Provider health check endpoint~~ ✓
+Implemented: `GET /providers/{name}/health` with Ollama-specific `/api/tags` check.
 
 ### Pagination on list endpoints
 **What:** Add `skip: int = 0, limit: int = 50` query parameters to `list_conversations`, `list_agents`, `list_workspaces`, and the new cross-workspace conversation list. Apply `.offset(skip).limit(limit)` in the repository queries.
@@ -103,15 +76,18 @@ Items are grouped by theme and ordered P0 → P3 within each group.
 **Where:** New Alembic migration, `persistence/models.py`, new `services/tool_service.py`, `api/routers/tools.py`, update `AgentService` to resolve tools from DB
 **Effort:** L | **Priority:** P2
 
+### API key rotation / re-generation
+**What:** `POST /auth/api-keys/{id}/rotate` — revoke the existing key and generate a new one in a single atomic operation. Returns the new raw key.
+**Why:** Key rotation is a security best practice. Currently, users must manually delete and recreate keys, which creates a window where no key is active. Rotation makes this seamless.
+**Where:** `api/routers/auth.py`, `persistence/api_key_repository.py`
+**Effort:** S | **Priority:** P2
+
 ---
 
-## Infrastructure (P1)
+## Infrastructure (P1) — DONE
 
-### Dockerfile + docker-compose
-**What:** A production-grade `Dockerfile` (uv sync, alembic upgrade head as init step, uvicorn) and `docker-compose.yml` (app + postgres + optional redis). `HEALTHCHECK` instruction in Dockerfile. Graceful shutdown via SIGTERM in FastAPI lifespan hook.
-**Why:** Anyone who wants to run this today needs Python 3.13, uv, and a Postgres instance configured manually. Docker makes this a single `docker compose up`. It also unblocks deployment to any Docker host (Fly.io, Railway, Render, self-hosted).
-**Where:** New `Dockerfile`, `docker-compose.yml`, update `.env.example` with compose-compatible defaults
-**Effort:** M | **Priority:** P1
+### ~~Dockerfile + docker-compose~~ ✓
+Implemented: `Dockerfile` with uv, `docker-compose.yml` with app + postgres + migrate service, `.dockerignore`.
 
 ---
 

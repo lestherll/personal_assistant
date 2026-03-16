@@ -24,7 +24,7 @@ class AgentConfigResponse(BaseModel):
     system_prompt: str
     provider: str | None
     model: str | None
-    allowed_tools: list[str]
+    allowed_tools: list[str] | None
 
 
 class AgentResponse(BaseModel):
@@ -109,6 +109,15 @@ class AgentParticipationResponse(BaseModel):
         )
 
 
+class MessageResponse(BaseModel):
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    role: str
+    content: str
+    agent_id: uuid.UUID | None
+    created_at: datetime
+
+
 class ChatResponse(BaseModel):
     reply: str
     conversation_id: uuid.UUID  # always returned
@@ -171,3 +180,27 @@ class UserResponse(BaseModel):
 class RegisterResponse(BaseModel):
     user: UserResponse
     tokens: TokenResponse
+
+
+# ---------------------------------------------------------------------------
+# API key schemas
+# ---------------------------------------------------------------------------
+
+
+class CreateAPIKeyRequest(BaseModel):
+    name: str
+
+
+class APIKeyResponse(BaseModel):
+    id: uuid.UUID
+    name: str
+    key_prefix: str
+    is_active: bool
+    expires_at: datetime | None
+    last_used_at: datetime | None
+    created_at: datetime
+
+
+class CreateAPIKeyResponse(BaseModel):
+    key: str
+    api_key: APIKeyResponse

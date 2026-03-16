@@ -268,9 +268,9 @@ class WorkspaceService:
                     system_prompt=r.system_prompt,
                     provider=r.provider,
                     model=r.model,
-                    allowed_tools=list(r.allowed_tools),
+                    allowed_tools=list(r.allowed_tools) if r.allowed_tools is not None else None,
                 ),
-                tools=list(r.allowed_tools),
+                tools=list(r.allowed_tools) if r.allowed_tools is not None else [],
                 llm_info={"provider": r.provider, "model": r.model, "source": "registry"},
             )
             for r in agent_rows

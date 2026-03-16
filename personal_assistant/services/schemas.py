@@ -23,7 +23,7 @@ class CreateAgentRequest(BaseModel):
     system_prompt: str
     provider: str | None = None
     model: str | None = None
-    allowed_tools: list[str] = Field(default_factory=list)
+    allowed_tools: list[str] | None = None
 
 
 class UpdateAgentRequest(BaseModel):

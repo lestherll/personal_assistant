@@ -95,7 +95,9 @@ def _seed_database(db_file: str) -> None:
                     system_prompt=agent.config.system_prompt,
                     provider=agent.config.provider,
                     model=agent.config.model,
-                    allowed_tools=list(agent.config.allowed_tools),
+                    allowed_tools=list(agent.config.allowed_tools)
+                    if agent.config.allowed_tools is not None
+                    else None,
                 )
             )
 

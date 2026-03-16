@@ -14,7 +14,6 @@ def make_mock_agent(name: str = "TestAgent") -> Agent:
         description="A mock agent",
         system_prompt="You are a mock.",
     )
-    agent.config.allowed_tools = []
     agent.llm = MagicMock()
     return agent
 

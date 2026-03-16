@@ -64,12 +64,28 @@ class TestToolManagement:
         assert "allowed_tool" in agent.tools
         assert "blocked_tool" not in agent.tools
 
-    def test_empty_allowed_tools_accepts_all(self, agent, mock_graph) -> None:
+    def test_none_allowed_tools_accepts_all(self, agent, mock_graph) -> None:
+        """allowed_tools=None (default) means accept all tools."""
+        assert agent.config.allowed_tools is None  # default from fixture
         with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent.register_tool(make_tool("tool_a"))
             agent.register_tool(make_tool("tool_b"))
         assert "tool_a" in agent.tools
         assert "tool_b" in agent.tools
+
+    def test_empty_allowed_tools_rejects_all(self, mock_registry, mock_graph) -> None:
+        """allowed_tools=[] means no tools allowed."""
+        config = AgentConfig(
+            name="NoTools",
+            description="No tools agent",
+            system_prompt="You have no tools.",
+            allowed_tools=[],
+        )
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
+            agent = Agent(config, mock_registry)
+            agent.register_tool(make_tool("tool_a"))
+            agent.register_tool(make_tool("tool_b"))
+        assert agent.tools == []
 
     def test_register_tool_injects_agent_config(self, agent, mock_graph) -> None:
         tool = AgentInformationTool()
@@ -400,3 +416,47 @@ class TestClone:
     def test_clone_without_llm_uses_template_llm(self, agent) -> None:
         clone = agent.clone()
         assert clone._llm is agent._llm
+
+
+class TestLlmRetry:
+    """Tests for automatic retry wrapping on the LLM passed to the graph builder."""
+
+    def test_graph_receives_retry_wrapped_llm(
+        self, agent_config, mock_registry, mock_provider
+    ) -> None:
+        """The LLM passed to create_agent should be wrapped with with_retry."""
+        with patch("personal_assistant.core.agent.create_agent") as mock_create:
+            mock_create.return_value = MagicMock()
+            Agent(agent_config, mock_registry)
+
+        # The raw LLM should have had with_retry called
+        raw_llm = mock_provider.get_model.return_value
+        raw_llm.with_retry.assert_called_with(stop_after_attempt=3)
+        # create_agent should receive the retry-wrapped LLM
+        mock_create.assert_called_once()
+        call_kwargs = mock_create.call_args
+        assert call_kwargs.kwargs.get("model") is raw_llm.with_retry.return_value
+
+    def test_agent_llm_stays_unwrapped(
+        self, agent_config, mock_registry, mock_provider, mock_graph
+    ) -> None:
+        """agent._llm stays raw (not retry-wrapped) for with_structured_output."""
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
+            agent = Agent(agent_config, mock_registry)
+
+        raw_llm = mock_provider.get_model.return_value
+        assert agent._llm is raw_llm
+
+    def test_direct_llm_also_gets_retry_in_graph(self, agent_config) -> None:
+        """LLMs provided directly (not via registry) also get retry in the graph."""
+        from langchain_core.language_models import BaseChatModel
+
+        direct_llm = MagicMock(spec=BaseChatModel)
+
+        with patch("personal_assistant.core.agent.create_agent") as mock_create:
+            mock_create.return_value = MagicMock()
+            Agent(agent_config, llm=direct_llm)
+
+        direct_llm.with_retry.assert_called_with(stop_after_attempt=3)
+        call_kwargs = mock_create.call_args
+        assert call_kwargs.kwargs.get("model") is direct_llm.with_retry.return_value

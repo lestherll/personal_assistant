@@ -13,7 +13,7 @@ class AgentConfigView:
     system_prompt: str
     provider: str | None
     model: str | None
-    allowed_tools: list[str]
+    allowed_tools: list[str] | None
 
 
 @dataclass
@@ -55,6 +55,16 @@ class WorkspaceChatView:
     response: str
     conversation_id: str
     agent_used: str
+
+
+@dataclass(frozen=True)
+class MessageView:
+    id: uuid.UUID
+    conversation_id: uuid.UUID
+    role: str
+    content: str
+    agent_id: uuid.UUID | None
+    created_at: datetime
 
 
 @dataclass

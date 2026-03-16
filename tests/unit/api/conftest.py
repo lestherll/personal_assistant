@@ -18,6 +18,7 @@ from api.dependencies import (
     get_db_session,
     get_provider_registry,
     get_workspace_service,
+    rate_limit_chat,
 )
 from api.exception_handlers import register_exception_handlers
 from api.routers import agents, providers, workspaces
@@ -41,7 +42,7 @@ def make_agent_view(name: str = "Assistant", **overrides: Any) -> AgentView:
             system_prompt="You are helpful.",
             provider="ollama",
             model="qwen2.5:14b",
-            allowed_tools=[],
+            allowed_tools=None,
         ),
         "tools": [],
         "llm_info": {"provider": "ollama", "model": "qwen2.5:14b", "source": "registry"},
@@ -147,6 +148,7 @@ async def api_client(
     app.dependency_overrides[get_db_session] = lambda: None
     app.dependency_overrides[get_provider_registry] = lambda: mock_provider_registry
     app.dependency_overrides[get_current_user] = lambda: DEV_USER
+    app.dependency_overrides[rate_limit_chat] = lambda: None
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app), base_url="http://test"
     ) as client:
