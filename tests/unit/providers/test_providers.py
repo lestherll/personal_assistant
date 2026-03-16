@@ -77,22 +77,32 @@ class TestAnthropicProvider:
             call_kwargs = mock_cls.call_args.kwargs
         assert call_kwargs["api_key"].get_secret_value() == "sk-from-config"
 
-    def test_get_model_falls_back_to_env_var(self, monkeypatch):
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-from-env")
+    def test_get_model_falls_back_to_env_var(self):
+        from personal_assistant.config import Settings
+
+        mock_settings = Settings(anthropic_api_key="sk-from-env")
         provider = AnthropicProvider(AnthropicConfig())  # No api_key in config
-        with patch("personal_assistant.providers.anthropic.ChatAnthropic") as mock_cls:
-            mock_cls.return_value = MagicMock(spec=BaseChatModel)
-            provider.get_model()
-            call_kwargs = mock_cls.call_args.kwargs
+        with patch(
+            "personal_assistant.providers.anthropic.get_settings", return_value=mock_settings
+        ):
+            with patch("personal_assistant.providers.anthropic.ChatAnthropic") as mock_cls:
+                mock_cls.return_value = MagicMock(spec=BaseChatModel)
+                provider.get_model()
+                call_kwargs = mock_cls.call_args.kwargs
         assert call_kwargs["api_key"].get_secret_value() == "sk-from-env"
 
-    def test_get_model_no_api_key_omits_key_arg(self, monkeypatch):
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    def test_get_model_no_api_key_omits_key_arg(self):
+        from personal_assistant.config import Settings
+
+        mock_settings = Settings(anthropic_api_key=None)
         provider = AnthropicProvider(AnthropicConfig())  # No api_key anywhere
-        with patch("personal_assistant.providers.anthropic.ChatAnthropic") as mock_cls:
-            mock_cls.return_value = MagicMock(spec=BaseChatModel)
-            provider.get_model()
-            call_kwargs = mock_cls.call_args.kwargs
+        with patch(
+            "personal_assistant.providers.anthropic.get_settings", return_value=mock_settings
+        ):
+            with patch("personal_assistant.providers.anthropic.ChatAnthropic") as mock_cls:
+                mock_cls.return_value = MagicMock(spec=BaseChatModel)
+                provider.get_model()
+                call_kwargs = mock_cls.call_args.kwargs
         assert "api_key" not in call_kwargs
 
     def test_get_model_passes_temperature_kwarg(self):

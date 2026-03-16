@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -10,6 +9,7 @@ from langchain_core.tools import BaseTool
 from api.exception_handlers import register_exception_handlers
 from api.routers import agents, auth, health, providers, workspaces
 from personal_assistant.bootstrap import build_registry
+from personal_assistant.config import get_settings
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.persistence.database import build_engine, build_session_factory
 from personal_assistant.services.agent_service import AgentService
@@ -23,9 +23,8 @@ from personal_assistant.workspaces.default_workspace import create_default_works
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # --- Auth check ---
-    database_url = os.getenv("DATABASE_URL")
-    auth_disabled = os.getenv("AUTH_DISABLED", "false").lower() == "true"
-    if not database_url and not auth_disabled:
+    settings = get_settings()
+    if not settings.database_url and not settings.auth_disabled:
         raise RuntimeError(
             "DATABASE_URL is required when AUTH_DISABLED is not set to 'true'. "
             "Set AUTH_DISABLED=true to run in-memory dev mode."
@@ -52,8 +51,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # --- Persistence (optional) ---
     engine = None
-    if database_url:
-        engine = build_engine(database_url)
+    if settings.database_url:
+        engine = build_engine(settings.database_url)
         app.state.session_factory = build_session_factory(engine)
     else:
         app.state.session_factory = None

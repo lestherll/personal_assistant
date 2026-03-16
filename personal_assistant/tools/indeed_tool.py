@@ -7,6 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from personal_assistant.config import get_settings
 from personal_assistant.core.tool import AssistantTool
 
 _INDEED_API = "https://indeed-indeed.p.rapidapi.com/apisearch"
@@ -44,9 +45,7 @@ class IndeedJobSearchTool(AssistantTool[str]):
     args_schema: type[BaseModel] = JobSearchInput
 
     def _run(self, query: str, location: str = "", num_results: int = 5) -> str:
-        import os
-
-        api_key = os.getenv("RAPIDAPI_KEY", "")
+        api_key = get_settings().rapidapi_key
         if api_key:
             return self._search_rapidapi(query, location, num_results, api_key)
         return self._search_fallback(query, location, num_results)

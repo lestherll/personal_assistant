@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
@@ -10,6 +9,7 @@ from fastapi import Depends, Request
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from personal_assistant.config import Settings, get_settings
 from personal_assistant.persistence.models import User
 from personal_assistant.persistence.user_repository import UserRepository
 from personal_assistant.providers.registry import ProviderRegistry
@@ -18,7 +18,7 @@ from personal_assistant.services.auth_service import AuthService
 from personal_assistant.services.exceptions import AuthError
 from personal_assistant.services.workspace_service import WorkspaceService
 
-AUTH_DISABLED = os.getenv("AUTH_DISABLED", "false").lower() == "true"
+SettingsDep = Annotated[Settings, Depends(get_settings)]
 
 DEV_USER = User(
     id=uuid.UUID(int=0),
@@ -68,7 +68,7 @@ async def get_current_user(
     session: Annotated[AsyncSession | None, Depends(get_db_session)],
 ) -> User:
     """Return the current user from the JWT token, or the dev sentinel when AUTH_DISABLED."""
-    if AUTH_DISABLED:
+    if get_settings().auth_disabled:
         return DEV_USER
     if token is None:
         raise AuthError("No authentication token provided")

@@ -1,16 +1,14 @@
 import asyncio
-import os
-
-from dotenv import load_dotenv
 
 from personal_assistant.bootstrap import build_registry
+from personal_assistant.config import get_settings
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.persistence.database import build_engine, build_session_factory
 from personal_assistant.workspaces.default_workspace import create_default_workspace
 
 
 async def main() -> None:
-    load_dotenv()
+    settings = get_settings()
 
     # --- Provider registry ---
     registry = build_registry()
@@ -20,10 +18,9 @@ async def main() -> None:
     workspace = create_default_workspace(orchestrator)
 
     # --- Persistence (optional) ---
-    database_url = os.getenv("DATABASE_URL")
     session_factory = None
-    if database_url:
-        engine = build_engine(database_url)
+    if settings.database_url:
+        engine = build_engine(settings.database_url)
         session_factory = build_session_factory(engine)
 
     print("Personal Assistant")

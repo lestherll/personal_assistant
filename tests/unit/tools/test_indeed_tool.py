@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
-
+from personal_assistant.config import Settings
 from personal_assistant.tools.indeed_tool import IndeedJobSearchTool, _format_results
+
+_NO_KEY = Settings(rapidapi_key="")
+_WITH_KEY = Settings(rapidapi_key="test-key")
 
 
 class TestIndeedJobSearchToolStructure:
@@ -36,20 +38,19 @@ class TestIndeedJobSearchToolStructure:
 
 
 class TestIndeedJobSearchToolRun:
-    def test_fallback_returned_when_no_api_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("RAPIDAPI_KEY", raising=False)
-        tool = IndeedJobSearchTool()
-        result = tool._run(query="Software Engineer", location="London")
+    def test_fallback_returned_when_no_api_key(self) -> None:
+        with patch("personal_assistant.tools.indeed_tool.get_settings", return_value=_NO_KEY):
+            tool = IndeedJobSearchTool()
+            result = tool._run(query="Software Engineer", location="London")
         assert "RAPIDAPI_KEY" in result or "rapidapi" in result.lower()
 
-    def test_fallback_includes_indeed_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("RAPIDAPI_KEY", raising=False)
-        tool = IndeedJobSearchTool()
-        result = tool._run(query="Python Developer")
+    def test_fallback_includes_indeed_url(self) -> None:
+        with patch("personal_assistant.tools.indeed_tool.get_settings", return_value=_NO_KEY):
+            tool = IndeedJobSearchTool()
+            result = tool._run(query="Python Developer")
         assert "indeed.com" in result
 
-    def test_rapidapi_search_parses_results(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("RAPIDAPI_KEY", "test-key")
+    def test_rapidapi_search_parses_results(self) -> None:
         payload = {
             "results": [
                 {
@@ -67,18 +68,19 @@ class TestIndeedJobSearchToolRun:
         mock_response.__enter__ = lambda s: s
         mock_response.__exit__ = MagicMock(return_value=False)
 
-        with patch("urllib.request.urlopen", return_value=mock_response):
-            tool = IndeedJobSearchTool()
-            result = tool._run(query="Python Dev", location="London")
+        with patch("personal_assistant.tools.indeed_tool.get_settings", return_value=_WITH_KEY):
+            with patch("urllib.request.urlopen", return_value=mock_response):
+                tool = IndeedJobSearchTool()
+                result = tool._run(query="Python Dev", location="London")
 
         assert "Python Dev" in result
         assert "ACME" in result
 
-    def test_rapidapi_search_handles_request_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("RAPIDAPI_KEY", "test-key")
-        with patch("urllib.request.urlopen", side_effect=OSError("network error")):
-            tool = IndeedJobSearchTool()
-            result = tool._run(query="Python Dev")
+    def test_rapidapi_search_handles_request_error(self) -> None:
+        with patch("personal_assistant.tools.indeed_tool.get_settings", return_value=_WITH_KEY):
+            with patch("urllib.request.urlopen", side_effect=OSError("network error")):
+                tool = IndeedJobSearchTool()
+                result = tool._run(query="Python Dev")
 
         assert "failed" in result.lower()
 
