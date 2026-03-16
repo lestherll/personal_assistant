@@ -1,4 +1,3 @@
-import os
 from dataclasses import dataclass
 from typing import Any, ClassVar
 
@@ -6,6 +5,7 @@ from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
 from pydantic import SecretStr
 
+from personal_assistant.config import get_settings
 from personal_assistant.providers.base import AIProvider, ProviderConfig
 
 
@@ -41,7 +41,7 @@ class AnthropicProvider(AIProvider):
         return list(self._KNOWN_MODELS)
 
     def get_model(self, model: str | None = None, **kwargs: Any) -> BaseChatModel:
-        raw_key = self.config.api_key or os.getenv("ANTHROPIC_API_KEY")
+        raw_key = self.config.api_key or get_settings().anthropic_api_key
         extra: dict[str, Any] = {}
         if raw_key:
             extra["api_key"] = SecretStr(raw_key)

@@ -10,8 +10,8 @@ A modular AI personal assistant built on LangChain and LangGraph. The core conce
 - **LangChain** + **LangGraph** — agent orchestration (ReAct loop via `create_agent`)
 - **langchain-anthropic** — Anthropic/Claude provider
 - **langchain-ollama** — Ollama local provider
-- **python-dotenv** — `.env` loading
-- **pydantic v2** — tool input schemas + request/response schemas
+- **pydantic v2** — tool input schemas, request/response schemas, and centralised settings (`pydantic-settings`)
+- **pydantic-settings** — `.env` loading + typed `Settings` class (`personal_assistant/config.py`)
 - **SQLAlchemy 2 (async)** + **asyncpg** — optional PostgreSQL persistence
 - **alembic** — database migrations
 - **FastAPI** — REST API layer
@@ -26,6 +26,7 @@ A modular AI personal assistant built on LangChain and LangGraph. The core conce
 
 ```
 personal_assistant/
+├── config.py             # Settings (pydantic-settings) + get_settings() — centralised env/config
 ├── bootstrap.py          # build_registry() — shared provider registry setup for REPL + API
 ├── core/
 │   ├── agent.py          # Agent + AgentConfig — LangGraph ReAct agent with history
@@ -101,6 +102,9 @@ main.py                       # REPL entry point — bootstraps registry, orches
 ```
 
 ## Key Concepts
+
+### Settings
+`personal_assistant/config.py` defines a `Settings` class (extends `pydantic_settings.BaseSettings`) that reads all configuration from environment variables and `.env` files. `get_settings()` returns a module-cached singleton via `@lru_cache`. All code that needs env vars should call `get_settings()` rather than `os.getenv` directly. In tests, patch `get_settings` at the consumer's import path (e.g. `personal_assistant.providers.anthropic.get_settings`).
 
 ### Bootstrap
 `personal_assistant/bootstrap.py` exports `build_registry() -> ProviderRegistry`, which registers `AnthropicProvider` and `OllamaProvider` (set as default, model `qwen2.5:14b`). Both `main.py` (REPL) and `api/main.py` call this function — do not duplicate registration elsewhere.
@@ -258,7 +262,7 @@ uv run alembic upgrade head                    # Apply DB migrations
 - **New providers:** subclass `AIProvider` in `personal_assistant/providers/`, implement `get_model()`, register via `build_registry()` in `personal_assistant/bootstrap.py`.
 - **New workspaces:** add a factory function in `personal_assistant/workspaces/`. Use `WorkspaceService` when calling from service/API layers.
 - **New API endpoints:** add a router in `api/routers/`, include it in `api/main.py`, and add any new service exceptions to `api/exception_handlers.py`. Reuse or extend annotated path parameters from `api/routers/params.py`.
-- Do not hardcode API keys — always use `.env`.
+- Do not hardcode API keys or call `os.getenv` directly — use `get_settings()` from `personal_assistant.config`.
 - Agent conversation history is cached per `(user_id, workspace_name, conversation_id)` in `InMemoryConversationCache`. The cache is automatically updated after each `run_agent` / `stream_agent` call. Call `AgentService.delete_conversation` to remove a conversation and invalidate its cache entry.
 - `DATABASE_URL` is optional. When absent, the app runs fully in-memory with no persistence. Conversation list/delete endpoints return empty lists / 404 when no DB is configured.
 - Service exceptions (`NotFoundError`, `AlreadyExistsError`, `ServiceValidationError`, `AuthError`, `ForbiddenError`) are in `services/exceptions.py` — catch these at API/CLI boundaries. `AuthError` maps to HTTP 401; `ForbiddenError` to 403.
