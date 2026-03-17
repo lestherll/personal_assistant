@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import ModelRetryMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 from langchain_core.tools import BaseTool
@@ -153,18 +154,16 @@ class Agent:
     def _build_graph(self) -> Any:
         self._dirty = False
         return create_agent(
-            model=self._llm.with_retry(stop_after_attempt=3),  # type: ignore
+            model=self._llm,
             tools=self._tools,
             system_prompt=self.config.system_prompt,
-            # TODO: investigate whether to do retries via middleware or not
-            # from langchain.agents.middleware import ModelRetryMiddleware
-            # middleware=[
-            #     ModelRetryMiddleware(
-            #         max_retries=3,
-            #         backoff_factor=2.0,
-            #         initial_delay=1.0,
-            #     ),
-            # ],
+            middleware=[
+                ModelRetryMiddleware(
+                    max_retries=3,
+                    backoff_factor=2.0,
+                    initial_delay=1.0,
+                ),
+            ],
         )
 
     def _ensure_graph(self) -> None:

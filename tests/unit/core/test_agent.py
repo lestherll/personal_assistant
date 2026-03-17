@@ -419,23 +419,25 @@ class TestClone:
 
 
 class TestLlmRetry:
-    """Tests for automatic retry wrapping on the LLM passed to the graph builder."""
+    """Tests for automatic retry via ModelRetryMiddleware in the graph builder."""
 
-    def test_graph_receives_retry_wrapped_llm(
+    def test_graph_receives_raw_llm_with_middleware(
         self, agent_config, mock_registry, mock_provider
     ) -> None:
-        """The LLM passed to create_agent should be wrapped with with_retry."""
+        """create_agent should receive the raw LLM and ModelRetryMiddleware."""
+        from langchain.agents.middleware import ModelRetryMiddleware
+
         with patch("personal_assistant.core.agent.create_agent") as mock_create:
             mock_create.return_value = MagicMock()
             Agent(agent_config, mock_registry)
 
-        # The raw LLM should have had with_retry called
         raw_llm = mock_provider.get_model.return_value
-        raw_llm.with_retry.assert_called_with(stop_after_attempt=3)
-        # create_agent should receive the retry-wrapped LLM
         mock_create.assert_called_once()
         call_kwargs = mock_create.call_args
-        assert call_kwargs.kwargs.get("model") is raw_llm.with_retry.return_value
+        # Raw LLM is passed directly — no with_retry wrapping
+        assert call_kwargs.kwargs.get("model") is raw_llm
+        middleware = call_kwargs.kwargs.get("middleware", [])
+        assert any(isinstance(m, ModelRetryMiddleware) for m in middleware)
 
     def test_agent_llm_stays_unwrapped(
         self, agent_config, mock_registry, mock_provider, mock_graph
@@ -447,8 +449,9 @@ class TestLlmRetry:
         raw_llm = mock_provider.get_model.return_value
         assert agent._llm is raw_llm
 
-    def test_direct_llm_also_gets_retry_in_graph(self, agent_config) -> None:
-        """LLMs provided directly (not via registry) also get retry in the graph."""
+    def test_direct_llm_also_gets_middleware_in_graph(self, agent_config) -> None:
+        """LLMs provided directly (not via registry) also use ModelRetryMiddleware."""
+        from langchain.agents.middleware import ModelRetryMiddleware
         from langchain_core.language_models import BaseChatModel
 
         direct_llm = MagicMock(spec=BaseChatModel)
@@ -457,6 +460,7 @@ class TestLlmRetry:
             mock_create.return_value = MagicMock()
             Agent(agent_config, llm=direct_llm)
 
-        direct_llm.with_retry.assert_called_with(stop_after_attempt=3)
         call_kwargs = mock_create.call_args
-        assert call_kwargs.kwargs.get("model") is direct_llm.with_retry.return_value
+        assert call_kwargs.kwargs.get("model") is direct_llm
+        middleware = call_kwargs.kwargs.get("middleware", [])
+        assert any(isinstance(m, ModelRetryMiddleware) for m in middleware)
