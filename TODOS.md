@@ -11,7 +11,7 @@ Items are grouped by theme and ordered P0 → P3 within each group.
 Implemented: SSE helper in `api/streaming.py` with `[DONE]`/`[ERROR]` sentinels + service-layer error handling in `_generate()`.
 
 ### ~~LLM retry on transient errors~~ ✓
-Implemented: `with_retry(stop_after_attempt=3)` in `Agent._build_graph()`.
+Implemented: `ModelRetryMiddleware` passed via `middleware` param to `create_agent()` in `Agent._build_graph()`.
 
 ---
 
