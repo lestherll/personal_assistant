@@ -60,7 +60,7 @@ async def test_create_agent_calls_service(
     assert call_kwargs["system_prompt"] == "You are helpful."
     assert call_kwargs["provider"] is None
     assert call_kwargs["model"] is None
-    assert call_kwargs["allowed_tools"] == []
+    assert call_kwargs["allowed_tools"] is None
 
 
 async def test_create_agent_workspace_not_found_returns_404(

@@ -3,10 +3,11 @@ from __future__ import annotations
 import uuid
 from collections.abc import AsyncIterator, Iterator
 from contextlib import contextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from langchain.agents import create_agent
+from langchain.agents.middleware import ModelRetryMiddleware
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage
 from langchain_core.tools import BaseTool
@@ -38,8 +39,9 @@ class AgentConfig:
     system_prompt: str
     provider: str | None = None  # Registry key — None means use the registry default
     model: str | None = None  # Model name — None means use the provider's default
-    # Names of tools this agent is allowed to use (empty = accept all added tools)
-    allowed_tools: list[str] = field(default_factory=list)
+    # Names of tools this agent is allowed to use.
+    # None = accept all tools, [] = no tools, ["x"] = explicit allowlist
+    allowed_tools: list[str] | None = None
     # DB primary key for this agent row — injected by the service layer when known
     agent_id: uuid.UUID | None = None
 
@@ -155,6 +157,13 @@ class Agent:
             model=self._llm,
             tools=self._tools,
             system_prompt=self.config.system_prompt,
+            middleware=[
+                ModelRetryMiddleware(
+                    max_retries=3,
+                    backoff_factor=2.0,
+                    initial_delay=1.0,
+                ),
+            ],
         )
 
     def _ensure_graph(self) -> None:
@@ -185,7 +194,7 @@ class Agent:
 
         The graph is marked dirty and will be rebuilt on the next run() call.
         """
-        if self.config.allowed_tools and tool.name not in self.config.allowed_tools:
+        if self.config.allowed_tools is not None and tool.name not in self.config.allowed_tools:
             return
         if any(t.name == tool.name for t in self._tools):
             return

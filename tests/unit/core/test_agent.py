@@ -64,12 +64,28 @@ class TestToolManagement:
         assert "allowed_tool" in agent.tools
         assert "blocked_tool" not in agent.tools
 
-    def test_empty_allowed_tools_accepts_all(self, agent, mock_graph) -> None:
+    def test_none_allowed_tools_accepts_all(self, agent, mock_graph) -> None:
+        """allowed_tools=None (default) means accept all tools."""
+        assert agent.config.allowed_tools is None  # default from fixture
         with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent.register_tool(make_tool("tool_a"))
             agent.register_tool(make_tool("tool_b"))
         assert "tool_a" in agent.tools
         assert "tool_b" in agent.tools
+
+    def test_empty_allowed_tools_rejects_all(self, mock_registry, mock_graph) -> None:
+        """allowed_tools=[] means no tools allowed."""
+        config = AgentConfig(
+            name="NoTools",
+            description="No tools agent",
+            system_prompt="You have no tools.",
+            allowed_tools=[],
+        )
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
+            agent = Agent(config, mock_registry)
+            agent.register_tool(make_tool("tool_a"))
+            agent.register_tool(make_tool("tool_b"))
+        assert agent.tools == []
 
     def test_register_tool_injects_agent_config(self, agent, mock_graph) -> None:
         tool = AgentInformationTool()
@@ -400,3 +416,51 @@ class TestClone:
     def test_clone_without_llm_uses_template_llm(self, agent) -> None:
         clone = agent.clone()
         assert clone._llm is agent._llm
+
+
+class TestLlmRetry:
+    """Tests for automatic retry via ModelRetryMiddleware in the graph builder."""
+
+    def test_graph_receives_raw_llm_with_middleware(
+        self, agent_config, mock_registry, mock_provider
+    ) -> None:
+        """create_agent should receive the raw LLM and ModelRetryMiddleware."""
+        from langchain.agents.middleware import ModelRetryMiddleware
+
+        with patch("personal_assistant.core.agent.create_agent") as mock_create:
+            mock_create.return_value = MagicMock()
+            Agent(agent_config, mock_registry)
+
+        raw_llm = mock_provider.get_model.return_value
+        mock_create.assert_called_once()
+        call_kwargs = mock_create.call_args
+        # Raw LLM is passed directly — no with_retry wrapping
+        assert call_kwargs.kwargs.get("model") is raw_llm
+        middleware = call_kwargs.kwargs.get("middleware", [])
+        assert any(isinstance(m, ModelRetryMiddleware) for m in middleware)
+
+    def test_agent_llm_stays_unwrapped(
+        self, agent_config, mock_registry, mock_provider, mock_graph
+    ) -> None:
+        """agent._llm stays raw (not retry-wrapped) for with_structured_output."""
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
+            agent = Agent(agent_config, mock_registry)
+
+        raw_llm = mock_provider.get_model.return_value
+        assert agent._llm is raw_llm
+
+    def test_direct_llm_also_gets_middleware_in_graph(self, agent_config) -> None:
+        """LLMs provided directly (not via registry) also use ModelRetryMiddleware."""
+        from langchain.agents.middleware import ModelRetryMiddleware
+        from langchain_core.language_models import BaseChatModel
+
+        direct_llm = MagicMock(spec=BaseChatModel)
+
+        with patch("personal_assistant.core.agent.create_agent") as mock_create:
+            mock_create.return_value = MagicMock()
+            Agent(agent_config, llm=direct_llm)
+
+        call_kwargs = mock_create.call_args
+        assert call_kwargs.kwargs.get("model") is direct_llm
+        middleware = call_kwargs.kwargs.get("middleware", [])
+        assert any(isinstance(m, ModelRetryMiddleware) for m in middleware)

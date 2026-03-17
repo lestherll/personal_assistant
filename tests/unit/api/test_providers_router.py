@@ -87,3 +87,39 @@ async def test_list_provider_models_not_found_returns_404(
     mock_provider_registry.get.side_effect = KeyError("unknown")
     response = await api_client.get("/providers/unknown/models")
     assert response.status_code == 404
+
+
+async def test_provider_health_returns_200(
+    api_client: httpx.AsyncClient, mock_provider_registry: MagicMock
+) -> None:
+    provider = MagicMock()
+    provider.health = AsyncMock(return_value={"status": "ok"})
+    mock_provider_registry.get.side_effect = None
+    mock_provider_registry.get.return_value = provider
+
+    response = await api_client.get("/providers/anthropic/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+async def test_provider_health_returns_error_detail(
+    api_client: httpx.AsyncClient, mock_provider_registry: MagicMock
+) -> None:
+    provider = MagicMock()
+    provider.health = AsyncMock(return_value={"status": "error", "detail": "unreachable"})
+    mock_provider_registry.get.side_effect = None
+    mock_provider_registry.get.return_value = provider
+
+    response = await api_client.get("/providers/ollama/health")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "error"
+    assert data["detail"] == "unreachable"
+
+
+async def test_provider_health_not_found_returns_404(
+    api_client: httpx.AsyncClient, mock_provider_registry: MagicMock
+) -> None:
+    mock_provider_registry.get.side_effect = KeyError("unknown")
+    response = await api_client.get("/providers/unknown/health")
+    assert response.status_code == 404

@@ -72,7 +72,7 @@ class UserWorkspaceRepository:
         system_prompt: str,
         provider: str | None,
         model: str | None,
-        allowed_tools: list[str],
+        allowed_tools: list[str] | None,
     ) -> UserAgent:
         agent = UserAgent(
             user_workspace_id=user_workspace_id,
@@ -118,7 +118,7 @@ class UserWorkspaceRepository:
         system_prompt: str,
         provider: str | None,
         model: str | None,
-        allowed_tools: list[str],
+        allowed_tools: list[str] | None,
     ) -> UserAgent:
         agent = await self.get_agent(user_workspace_id, name)
         if agent is None:

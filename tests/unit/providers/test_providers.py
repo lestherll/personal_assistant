@@ -215,3 +215,51 @@ class TestOllamaProvider:
             models = await provider.list_models()
 
         assert models == [provider.default_model]
+
+
+# ---------------------------------------------------------------------------
+# Health checks
+# ---------------------------------------------------------------------------
+
+
+class TestBaseProviderHealth:
+    async def test_default_health_returns_ok(self):
+        config = ProviderConfig(name="test", default_model="m1")
+        provider = ConcreteProvider(config)
+        result = await provider.health()
+        assert result == {"status": "ok"}
+
+
+class TestOllamaHealth:
+    async def test_health_ok(self):
+        provider = OllamaProvider(OllamaConfig())
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(return_value=mock_response)
+
+        with patch(
+            "personal_assistant.providers.ollama.httpx.AsyncClient", return_value=mock_client
+        ):
+            result = await provider.health()
+
+        assert result == {"status": "ok"}
+
+    async def test_health_error(self):
+        provider = OllamaProvider(OllamaConfig())
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=None)
+        mock_client.get = AsyncMock(side_effect=httpx.ConnectError("Connection refused"))
+
+        with patch(
+            "personal_assistant.providers.ollama.httpx.AsyncClient", return_value=mock_client
+        ):
+            result = await provider.health()
+
+        assert result["status"] == "error"
+        assert "Connection refused" in result["detail"]

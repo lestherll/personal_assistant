@@ -41,6 +41,10 @@ class AIProvider(ABC):
         """
         ...
 
+    async def health(self) -> dict[str, str]:
+        """Check provider health. Returns {"status": "ok"} or {"status": "error", "detail": ...}."""
+        return {"status": "ok"}
+
     async def list_models(self) -> list[str]:
         """Return a list of available model names for this provider.
 

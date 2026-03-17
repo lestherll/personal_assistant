@@ -114,7 +114,7 @@ class UserAgent(Base):
     system_prompt: Mapped[str] = mapped_column(Text, nullable=False)
     provider: Mapped[str | None] = mapped_column(String(255), nullable=True)
     model: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    allowed_tools: Mapped[list[str]] = mapped_column(_JSON, nullable=False, default=list)
+    allowed_tools: Mapped[list[str] | None] = mapped_column(_JSON, nullable=True, default=None)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_now
     )
@@ -126,6 +126,31 @@ class UserAgent(Base):
 
     def __repr__(self) -> str:
         return f"UserAgent(id={self.id!s}, name={self.name!r})"
+
+
+class UserAPIKey(Base):
+    """An API key belonging to a user for programmatic access."""
+
+    __tablename__ = "user_api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
+    key_prefix: Mapped[str] = mapped_column(String(12), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_now
+    )
+
+    user: Mapped[User] = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"UserAPIKey(id={self.id!s}, name={self.name!r}, prefix={self.key_prefix!r})"
 
 
 class Conversation(Base):

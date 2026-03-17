@@ -1,0 +1,43 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: personal_assistant
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  migrate:
+    build: .
+    entrypoint: ["uv", "run", "alembic", "upgrade", "head"]
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/personal_assistant
+    depends_on:
+      db:
+        condition: service_healthy
+
+  app:
+    build: .
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/personal_assistant
+      AUTH_DISABLED: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pgdata:

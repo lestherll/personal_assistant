@@ -1,24 +1,31 @@
 from __future__ import annotations
 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from api.dependencies import get_db_session, get_orchestrator
+from api.dependencies import CurrentUserDep, get_db_session, get_orchestrator
 from api.schemas import (
+    APIKeyResponse,
+    CreateAPIKeyRequest,
+    CreateAPIKeyResponse,
     RefreshRequest,
     RegisterRequest,
     RegisterResponse,
     TokenResponse,
     UserResponse,
 )
+from personal_assistant.auth.api_keys import generate_api_key
 from personal_assistant.core.orchestrator import Orchestrator
+from personal_assistant.persistence.api_key_repository import APIKeyRepository
+from personal_assistant.persistence.models import UserAPIKey
 from personal_assistant.persistence.user_repository import UserRepository
 from personal_assistant.persistence.user_workspace_repository import UserWorkspaceRepository
 from personal_assistant.services.auth_service import AuthService, fork_default_workspace
-from personal_assistant.services.exceptions import ServiceValidationError
+from personal_assistant.services.exceptions import NotFoundError, ServiceValidationError
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -79,3 +86,64 @@ async def refresh_token(body: RefreshRequest, session: DbSessionDep) -> TokenRes
     service = AuthService(UserRepository(db))
     new_access_token = await service.refresh(body.refresh_token)
     return TokenResponse(access_token=new_access_token, refresh_token=body.refresh_token)
+
+
+# ---------------------------------------------------------------------------
+# API key management
+# ---------------------------------------------------------------------------
+
+
+def _api_key_response(row: UserAPIKey) -> APIKeyResponse:
+    return APIKeyResponse(
+        id=row.id,
+        name=row.name,
+        key_prefix=row.key_prefix,
+        is_active=row.is_active,
+        expires_at=row.expires_at,
+        last_used_at=row.last_used_at,
+        created_at=row.created_at,
+    )
+
+
+@router.post("/api-keys", response_model=CreateAPIKeyResponse, status_code=status.HTTP_201_CREATED)
+async def create_api_key(
+    body: CreateAPIKeyRequest,
+    user: CurrentUserDep,
+    session: DbSessionDep,
+) -> CreateAPIKeyResponse:
+    db = _require_session(session)
+    raw_key, key_hash = generate_api_key()
+    repo = APIKeyRepository(db)
+    row = await repo.create(
+        user_id=user.id,
+        name=body.name,
+        key_hash=key_hash,
+        key_prefix=raw_key[:11],
+    )
+    await db.commit()
+    return CreateAPIKeyResponse(key=raw_key, api_key=_api_key_response(row))
+
+
+@router.get("/api-keys", response_model=list[APIKeyResponse])
+async def list_api_keys(
+    user: CurrentUserDep,
+    session: DbSessionDep,
+) -> list[APIKeyResponse]:
+    db = _require_session(session)
+    repo = APIKeyRepository(db)
+    rows = await repo.list_for_user(user.id)
+    return [_api_key_response(r) for r in rows]
+
+
+@router.delete("/api-keys/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_api_key(
+    key_id: uuid.UUID,
+    user: CurrentUserDep,
+    session: DbSessionDep,
+) -> None:
+    db = _require_session(session)
+    repo = APIKeyRepository(db)
+    revoked = await repo.revoke(user.id, key_id)
+    if not revoked:
+        raise NotFoundError("api_key", str(key_id))
+    await db.commit()

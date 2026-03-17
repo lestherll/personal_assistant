@@ -27,6 +27,16 @@ class OllamaProvider(AIProvider):
         super().__init__(config or OllamaConfig())
         self.config: OllamaConfig
 
+    async def health(self) -> dict[str, str]:
+        """Check if the local Ollama instance is reachable."""
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{self.config.base_url}/api/tags")
+                resp.raise_for_status()
+                return {"status": "ok"}
+        except Exception as exc:
+            return {"status": "error", "detail": str(exc)}
+
     async def list_models(self) -> list[str]:
         """Query the local Ollama instance for available models.
 

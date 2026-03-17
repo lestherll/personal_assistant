@@ -12,10 +12,10 @@ import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport
 
-from api.dependencies import get_db_session
+from api.dependencies import get_current_user, get_db_session
 from api.exception_handlers import register_exception_handlers
 from api.routers import auth
-from personal_assistant.persistence.models import User
+from personal_assistant.persistence.models import User, UserAPIKey
 from personal_assistant.services.auth_service import AuthService
 from personal_assistant.services.exceptions import AlreadyExistsError, AuthError
 
@@ -33,8 +33,8 @@ def _make_user(username: str = "alice") -> User:
 
 
 @pytest.fixture
-def mock_session() -> MagicMock:
-    return MagicMock()
+def mock_session() -> AsyncMock:
+    return AsyncMock()
 
 
 @pytest.fixture
@@ -152,3 +152,116 @@ def _patch_auth_service(method: str, **kwargs: object):  # type: ignore[no-untyp
 
     mock = AsyncMock(**kwargs)
     return patch.object(AuthService, method, mock)
+
+
+# ---------------------------------------------------------------------------
+# API key endpoint fixtures
+# ---------------------------------------------------------------------------
+
+_DEV_USER = _make_user("dev")
+
+
+@pytest.fixture
+async def api_key_client(
+    mock_session: MagicMock, mock_orchestrator: MagicMock
+) -> AsyncIterator[httpx.AsyncClient]:
+    """Auth client with get_current_user overridden so API key endpoints work."""
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.include_router(auth.router)
+    app.state.orchestrator = mock_orchestrator
+    app.dependency_overrides[get_db_session] = lambda: mock_session
+    app.dependency_overrides[get_current_user] = lambda: _DEV_USER
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        yield client
+
+
+def _make_api_key_row(user_id: uuid.UUID, **overrides: object) -> MagicMock:
+    row = MagicMock(spec=UserAPIKey)
+    row.id = uuid.uuid4()
+    row.user_id = user_id
+    row.name = "my-key"
+    row.key_hash = "abc123"
+    row.key_prefix = "sk-test1234"
+    row.is_active = True
+    row.expires_at = None
+    row.last_used_at = None
+    row.created_at = datetime.now(UTC)
+    for k, v in overrides.items():
+        setattr(row, k, v)
+    return row
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/api-keys
+# ---------------------------------------------------------------------------
+
+
+class TestCreateApiKeyEndpoint:
+    async def test_create_api_key_returns_201(self, api_key_client: httpx.AsyncClient) -> None:
+        row = _make_api_key_row(_DEV_USER.id)
+        with patch("api.routers.auth.APIKeyRepository") as MockRepo:
+            MockRepo.return_value.create = AsyncMock(return_value=row)
+            resp = await api_key_client.post("/auth/api-keys", json={"name": "my-key"})
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["key"].startswith("sk-")
+        assert data["api_key"]["name"] == "my-key"
+
+    async def test_create_api_key_response_shape(self, api_key_client: httpx.AsyncClient) -> None:
+        row = _make_api_key_row(_DEV_USER.id)
+        with patch("api.routers.auth.APIKeyRepository") as MockRepo:
+            MockRepo.return_value.create = AsyncMock(return_value=row)
+            resp = await api_key_client.post("/auth/api-keys", json={"name": "test"})
+        data = resp.json()
+        assert "key" in data
+        api_key = data["api_key"]
+        assert "id" in api_key
+        assert "key_prefix" in api_key
+        assert "is_active" in api_key
+        assert "created_at" in api_key
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/api-keys
+# ---------------------------------------------------------------------------
+
+
+class TestListApiKeysEndpoint:
+    async def test_list_api_keys_returns_200(self, api_key_client: httpx.AsyncClient) -> None:
+        rows = [_make_api_key_row(_DEV_USER.id), _make_api_key_row(_DEV_USER.id, name="second")]
+        with patch("api.routers.auth.APIKeyRepository") as MockRepo:
+            MockRepo.return_value.list_for_user = AsyncMock(return_value=rows)
+            resp = await api_key_client.get("/auth/api-keys")
+        assert resp.status_code == 200
+        assert len(resp.json()) == 2
+
+    async def test_list_api_keys_empty(self, api_key_client: httpx.AsyncClient) -> None:
+        with patch("api.routers.auth.APIKeyRepository") as MockRepo:
+            MockRepo.return_value.list_for_user = AsyncMock(return_value=[])
+            resp = await api_key_client.get("/auth/api-keys")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+
+# ---------------------------------------------------------------------------
+# DELETE /auth/api-keys/{key_id}
+# ---------------------------------------------------------------------------
+
+
+class TestRevokeApiKeyEndpoint:
+    async def test_revoke_returns_204(self, api_key_client: httpx.AsyncClient) -> None:
+        key_id = uuid.uuid4()
+        with patch("api.routers.auth.APIKeyRepository") as MockRepo:
+            MockRepo.return_value.revoke = AsyncMock(return_value=True)
+            resp = await api_key_client.delete(f"/auth/api-keys/{key_id}")
+        assert resp.status_code == 204
+
+    async def test_revoke_not_found_returns_404(self, api_key_client: httpx.AsyncClient) -> None:
+        key_id = uuid.uuid4()
+        with patch("api.routers.auth.APIKeyRepository") as MockRepo:
+            MockRepo.return_value.revoke = AsyncMock(return_value=False)
+            resp = await api_key_client.delete(f"/auth/api-keys/{key_id}")
+        assert resp.status_code == 404

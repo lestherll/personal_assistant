@@ -69,7 +69,7 @@ def mock_agent_row(mock_ws_row):
     row.system_prompt = "Be helpful."
     row.provider = None
     row.model = None
-    row.allowed_tools = []
+    row.allowed_tools = None
     return row
 
 
