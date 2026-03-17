@@ -48,6 +48,7 @@ class ConversationView:
     user_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    title: str
 
 
 @dataclass

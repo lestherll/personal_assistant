@@ -4,7 +4,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from personal_assistant.persistence.models import Conversation, Message, MessageRole, UserAgent
@@ -33,9 +33,10 @@ class ConversationRepository:
         self,
         workspace_id: uuid.UUID,
         user_id: uuid.UUID | None = None,
+        title: str | None = None,
     ) -> Conversation:
         """Insert a new conversation row and return it."""
-        conv = Conversation(workspace_id=workspace_id, user_id=user_id)
+        conv = Conversation(workspace_id=workspace_id, user_id=user_id, title=title)
         self._session.add(conv)
         await self._session.commit()
         await self._session.refresh(conv)
@@ -56,6 +57,12 @@ class ConversationRepository:
         if conv:
             conv.updated_at = datetime.now(UTC)
             await self._session.commit()
+
+    async def update_title(self, conversation_id: uuid.UUID, title: str) -> None:
+        await self._session.execute(
+            update(Conversation).where(Conversation.id == conversation_id).values(title=title)
+        )
+        await self._session.flush()
 
     # ------------------------------------------------------------------
     # Messages

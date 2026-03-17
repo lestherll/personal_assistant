@@ -89,7 +89,7 @@ def _mock_ws_repo(ws_row=None, agent_row=None, agent_rows=None):
 
 def _mock_conv_repo(conv=None, messages=None, deleted=True):
     """Build a mocked ConversationRepository."""
-    repo = MagicMock()
+    repo = AsyncMock()
     repo.get_conversation = AsyncMock(return_value=conv)
     repo.get_conversation_for_workspace = AsyncMock(return_value=conv)
     repo.create_conversation = AsyncMock(return_value=conv)

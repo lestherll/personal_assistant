@@ -12,5 +12,5 @@ def build_registry() -> ProviderRegistry:
     """Create and configure the default provider registry."""
     registry = ProviderRegistry()
     registry.register(AnthropicProvider())
-    registry.register(OllamaProvider(OllamaConfig(default_model="qwen2.5:14b")), default=True)
+    registry.register(OllamaProvider(OllamaConfig(default_model="qwen3.5:4b")), default=True)
     return registry

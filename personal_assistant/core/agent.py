@@ -319,6 +319,7 @@ class Agent:
         session: AsyncSession,
         workspace_id: uuid.UUID,
         user_id: uuid.UUID | None = None,
+        title: str | None = None,
     ) -> uuid.UUID:
         """Create a new conversation in the DB and bind this agent to it.
 
@@ -327,7 +328,7 @@ class Agent:
         from personal_assistant.persistence.repository import ConversationRepository
 
         repo = ConversationRepository(session)
-        conv = await repo.create_conversation(workspace_id, user_id=user_id)
+        conv = await repo.create_conversation(workspace_id, user_id=user_id, title=title)
         self._conversation_id = conv.id
         self._history_loaded = True  # Fresh conversation — nothing to load
         self._history = []

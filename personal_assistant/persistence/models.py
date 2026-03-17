@@ -185,6 +185,7 @@ class Conversation(Base):
         order_by="Message.sequence_index",
         cascade="all, delete-orphan",
     )
+    title: Mapped[str] = mapped_column(String(255), nullable=True, default="Untitled Conversation")
 
     def __repr__(self) -> str:
         return f"Conversation(id={self.id!s}, workspace_id={self.workspace_id!s})"

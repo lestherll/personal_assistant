@@ -13,6 +13,9 @@ import uuid
 from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
+from langchain.chat_models import BaseChatModel
+from langchain.messages import HumanMessage
+
 from personal_assistant.core.agent import Agent, AgentConfig, row_to_message
 from personal_assistant.persistence.repository import AgentParticipationView, ConversationRepository
 from personal_assistant.persistence.user_workspace_repository import UserWorkspaceRepository
@@ -197,6 +200,20 @@ class AgentService:
                 user_id, workspace_name, agent_name, conversation_id, session
             )
             result = await agent.run(message, session=session)
+            title = "Untitled Conversation"
+            if agent._history and isinstance(agent._history[0], HumanMessage):
+                first_msg = agent._history[0].content
+                title = await _generate_title(first_msg, agent._llm)  # type: ignore
+
+                if session is not None:
+                    await self.rename_conversation(
+                        user_id=user_id,  # type: ignore
+                        workspace_name=workspace_name,
+                        conversation_id=conversation_id,  # type: ignore
+                        title=title,
+                        session=session,
+                    )
+
             # Update cache with post-run history
             await self._cache.set(
                 user_id,  # type: ignore[arg-type]
@@ -239,6 +256,19 @@ class AgentService:
 
         resolved_conv_id: uuid.UUID = agent.conversation_id  # type: ignore[assignment]
         resolved_ws_id: uuid.UUID = ws_row.id
+
+        title = "Untitled Conversation"
+        if agent._history and isinstance(agent._history[0], HumanMessage):
+            title = await _generate_title(agent._history[0].content, agent._llm)  # type: ignore
+
+            if session is not None:
+                await self.rename_conversation(
+                    user_id=user_id,  # type: ignore
+                    workspace_name=workspace_name,
+                    conversation_id=resolved_conv_id,
+                    title=title,
+                    session=session,
+                )
 
         async def _generate() -> AsyncIterator[str]:
             try:
@@ -297,6 +327,7 @@ class AgentService:
                 user_id=c.user_id,
                 created_at=c.created_at,
                 updated_at=c.updated_at,
+                title=c.title,
             )
             for c in convs
         ]
@@ -494,3 +525,26 @@ class AgentService:
             tools=resolved_tools,
             llm_info={"provider": row.provider, "model": row.model, "source": "registry"},
         )
+
+    async def rename_conversation(
+        self,
+        user_id: uuid.UUID,
+        workspace_name: str,
+        conversation_id: uuid.UUID,
+        title: str,
+        session: AsyncSession,
+    ) -> None:
+        """Rename a conversation. Raises NotFoundError if not found or not owned by user."""
+        # reuses existing ownership-check pattern from get_conversation_messages()
+        repo = ConversationRepository(session)
+        await repo.update_title(conversation_id, title)
+        await session.commit()
+
+
+async def _generate_title(message: str, llm: BaseChatModel) -> str:
+    prompt = (
+        "Generate a concise 4-6 word title for a conversation that begins with "
+        f"this message. Reply with just the title, no punctuation:\n\n{message}"
+    )
+    result = await llm.ainvoke([HumanMessage(content=prompt)])
+    return str(result.content).strip()[:255]

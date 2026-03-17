@@ -3,9 +3,9 @@ from __future__ import annotations
 import dataclasses
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Self
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from personal_assistant.persistence.repository import AgentParticipationView
 from personal_assistant.services.views import (
@@ -83,6 +83,7 @@ class ConversationResponse(BaseModel):
     user_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
+    title: str
 
     @classmethod
     def from_view(cls, view: ConversationView) -> ConversationResponse:
@@ -92,6 +93,17 @@ class ConversationResponse(BaseModel):
             user_id=view.user_id,
             created_at=view.created_at,
             updated_at=view.updated_at,
+            title=view.title,
+        )
+
+
+class RenameConversationRequest(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+
+    @classmethod
+    def from_view(cls, view: ConversationView) -> Self:
+        return cls(
+            title=view.title,
         )
 
 
