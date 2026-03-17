@@ -21,6 +21,7 @@ from api.schemas import (
 from personal_assistant.auth.api_keys import generate_api_key
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.persistence.api_key_repository import APIKeyRepository
+from personal_assistant.persistence.models import UserAPIKey
 from personal_assistant.persistence.user_repository import UserRepository
 from personal_assistant.persistence.user_workspace_repository import UserWorkspaceRepository
 from personal_assistant.services.auth_service import AuthService, fork_default_workspace
@@ -92,10 +93,7 @@ async def refresh_token(body: RefreshRequest, session: DbSessionDep) -> TokenRes
 # ---------------------------------------------------------------------------
 
 
-def _api_key_response(row: object) -> APIKeyResponse:
-    from personal_assistant.persistence.models import UserAPIKey
-
-    assert isinstance(row, UserAPIKey)
+def _api_key_response(row: UserAPIKey) -> APIKeyResponse:
     return APIKeyResponse(
         id=row.id,
         name=row.name,
