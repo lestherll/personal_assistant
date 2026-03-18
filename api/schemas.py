@@ -3,7 +3,7 @@ from __future__ import annotations
 import dataclasses
 import uuid
 from datetime import datetime
-from typing import Any, Self
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
@@ -83,7 +83,7 @@ class ConversationResponse(BaseModel):
     user_id: uuid.UUID | None
     created_at: datetime
     updated_at: datetime
-    title: str
+    title: str | None = None
 
     @classmethod
     def from_view(cls, view: ConversationView) -> ConversationResponse:
@@ -99,12 +99,6 @@ class ConversationResponse(BaseModel):
 
 class RenameConversationRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=255)
-
-    @classmethod
-    def from_view(cls, view: ConversationView) -> Self:
-        return cls(
-            title=view.title,
-        )
 
 
 class AgentParticipationResponse(BaseModel):

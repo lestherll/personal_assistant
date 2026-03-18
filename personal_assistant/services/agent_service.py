@@ -199,20 +199,19 @@ class AgentService:
             agent, ws_row = await self._prepare_agent(
                 user_id, workspace_name, agent_name, conversation_id, session
             )
+            is_first_turn = len(agent.history) == 0
             result = await agent.run(message, session=session)
-            title = "Untitled Conversation"
-            if agent._history and isinstance(agent._history[0], HumanMessage):
-                first_msg = agent._history[0].content
-                title = await _generate_title(first_msg, agent._llm)  # type: ignore
-
-                if session is not None:
-                    await self.rename_conversation(
-                        user_id=user_id,  # type: ignore
-                        workspace_name=workspace_name,
-                        conversation_id=conversation_id,  # type: ignore
-                        title=title,
-                        session=session,
-                    )
+            if is_first_turn and session is not None:
+                assert user_id is not None  # nosec B101 — guaranteed by _prepare_agent
+                assert agent.conversation_id is not None  # nosec B101 — created by start_conversation
+                title = await _generate_title(message, agent.llm)
+                await self.rename_conversation(
+                    user_id=user_id,
+                    workspace_name=workspace_name,
+                    conversation_id=agent.conversation_id,
+                    title=title,
+                    session=session,
+                )
 
             # Update cache with post-run history
             await self._cache.set(
@@ -257,18 +256,17 @@ class AgentService:
         resolved_conv_id: uuid.UUID = agent.conversation_id  # type: ignore[assignment]
         resolved_ws_id: uuid.UUID = ws_row.id
 
-        title = "Untitled Conversation"
-        if agent._history and isinstance(agent._history[0], HumanMessage):
-            title = await _generate_title(agent._history[0].content, agent._llm)  # type: ignore
-
-            if session is not None:
-                await self.rename_conversation(
-                    user_id=user_id,  # type: ignore
-                    workspace_name=workspace_name,
-                    conversation_id=resolved_conv_id,
-                    title=title,
-                    session=session,
-                )
+        is_first_turn = len(agent.history) == 0
+        if is_first_turn and session is not None:
+            assert user_id is not None  # nosec B101 — guaranteed by _prepare_agent
+            title = await _generate_title(message, agent.llm)
+            await self.rename_conversation(
+                user_id=user_id,
+                workspace_name=workspace_name,
+                conversation_id=resolved_conv_id,
+                title=title,
+                session=session,
+            )
 
         async def _generate() -> AsyncIterator[str]:
             try:
@@ -535,8 +533,20 @@ class AgentService:
         session: AsyncSession,
     ) -> None:
         """Rename a conversation. Raises NotFoundError if not found or not owned by user."""
-        # reuses existing ownership-check pattern from get_conversation_messages()
+        ws_repo = UserWorkspaceRepository(session)
+        ws_row = await ws_repo.get_workspace(user_id, workspace_name)
+        if ws_row is None:
+            raise NotFoundError("workspace", workspace_name)
+
         repo = ConversationRepository(session)
+        conv = await repo.get_conversation_for_workspace(
+            conversation_id,
+            ws_row.id,
+            user_id=user_id,
+        )
+        if conv is None:
+            raise NotFoundError("conversation", str(conversation_id))
+
         await repo.update_title(conversation_id, title)
         await session.commit()
 

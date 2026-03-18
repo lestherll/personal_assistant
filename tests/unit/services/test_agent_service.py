@@ -96,6 +96,7 @@ def _mock_conv_repo(conv=None, messages=None, deleted=True):
     repo.load_messages = AsyncMock(return_value=messages or [])
     repo.add_message = AsyncMock()
     repo.touch_conversation = AsyncMock()
+    repo.update_title = AsyncMock()
     repo.delete_conversation = AsyncMock(return_value=deleted)
     repo.list_conversations = AsyncMock(return_value=[conv] if conv else [])
     repo.list_agent_participation = AsyncMock(return_value=[])
@@ -527,6 +528,130 @@ class TestRunAgent:
 
 
 # ---------------------------------------------------------------------------
+# Conversation title
+# ---------------------------------------------------------------------------
+
+
+class TestConversationTitle:
+    async def test_run_agent_generates_title_on_first_turn_with_resolved_conv_id(
+        self, service, user_id
+    ):
+        session = AsyncMock()
+        conv_id = uuid.uuid4()
+        ws_row = MagicMock()
+        ws_row.id = uuid.uuid4()
+
+        agent = MagicMock()
+        agent.history = []
+        agent.llm = MagicMock()
+        agent.conversation_id = conv_id
+        agent.run = AsyncMock(return_value=MagicMock(content="ok"))
+
+        service._prepare_agent = AsyncMock(return_value=(agent, ws_row))
+        service._cache.set = AsyncMock()
+        service.rename_conversation = AsyncMock()
+
+        with patch(
+            "personal_assistant.services.agent_service._generate_title",
+            new=AsyncMock(return_value="My Title"),
+        ) as mock_generate_title:
+            await service.run_agent(
+                user_id,
+                "ws",
+                "Bot",
+                "Hello there",
+                conversation_id=None,
+                session=session,
+            )
+
+        mock_generate_title.assert_awaited_once_with("Hello there", agent.llm)
+        service.rename_conversation.assert_awaited_once_with(
+            user_id=user_id,
+            workspace_name="ws",
+            conversation_id=conv_id,
+            title="My Title",
+            session=session,
+        )
+
+    async def test_run_agent_skips_title_generation_on_subsequent_turn(self, service, user_id):
+        session = AsyncMock()
+        conv_id = uuid.uuid4()
+        ws_row = MagicMock()
+        ws_row.id = uuid.uuid4()
+
+        agent = MagicMock()
+        agent.history = [HumanMessage(content="First message")]
+        agent.llm = MagicMock()
+        agent.conversation_id = conv_id
+        agent.run = AsyncMock(return_value=MagicMock(content="ok"))
+
+        service._prepare_agent = AsyncMock(return_value=(agent, ws_row))
+        service._cache.set = AsyncMock()
+        service.rename_conversation = AsyncMock()
+
+        with patch(
+            "personal_assistant.services.agent_service._generate_title",
+            new=AsyncMock(return_value="Should Not Be Used"),
+        ) as mock_generate_title:
+            await service.run_agent(
+                user_id,
+                "ws",
+                "Bot",
+                "Second message",
+                conversation_id=conv_id,
+                session=session,
+            )
+
+        mock_generate_title.assert_not_awaited()
+        service.rename_conversation.assert_not_awaited()
+
+    async def test_stream_agent_generates_title_before_tokens(self, service, user_id):
+        session = AsyncMock()
+        conv_id = uuid.uuid4()
+        ws_row = MagicMock()
+        ws_row.id = uuid.uuid4()
+
+        async def _stream(*args, **kwargs):
+            yield MagicMock(content="hello")
+
+        agent = MagicMock()
+        agent.history = []
+        agent.llm = MagicMock()
+        agent.conversation_id = conv_id
+        agent.stream = _stream
+
+        service._prepare_agent = AsyncMock(return_value=(agent, ws_row))
+        service._cache.set = AsyncMock()
+        service.rename_conversation = AsyncMock()
+
+        with patch(
+            "personal_assistant.services.agent_service._generate_title",
+            new=AsyncMock(return_value="Stream Title"),
+        ) as mock_generate_title:
+            tokens, returned_conv_id = await service.stream_agent(
+                user_id,
+                "ws",
+                "Bot",
+                "Start stream",
+                conversation_id=None,
+                session=session,
+            )
+
+        assert returned_conv_id == conv_id
+        mock_generate_title.assert_awaited_once_with("Start stream", agent.llm)
+        service.rename_conversation.assert_awaited_once_with(
+            user_id=user_id,
+            workspace_name="ws",
+            conversation_id=conv_id,
+            title="Stream Title",
+            session=session,
+        )
+
+        chunks = [chunk async for chunk in tokens]
+        assert chunks == ["hello"]
+
+
+# ---------------------------------------------------------------------------
 # stream_agent
 # ---------------------------------------------------------------------------
 
@@ -664,6 +789,58 @@ class TestGetConversationMessages:
 
         with _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo), pytest.raises(NotFoundError):
             await service.get_conversation_messages(user_id, "ws", uuid.uuid4(), session=session)
+
+
+# ---------------------------------------------------------------------------
+# rename_conversation
+# ---------------------------------------------------------------------------
+
+
+class TestRenameConversation:
+    async def test_success(self, service, user_id, mock_ws_row):
+        session = AsyncMock()
+        conv_id = uuid.uuid4()
+        conv = _make_mock_conv(conv_id=conv_id, workspace_id=mock_ws_row.id, user_id=user_id)
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row)
+        conv_repo = _mock_conv_repo(conv=conv)
+
+        with _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo):
+            await service.rename_conversation(
+                user_id,
+                "ws",
+                conv_id,
+                "Renamed Conversation",
+                session,
+            )
+
+        conv_repo.get_conversation_for_workspace.assert_awaited_once_with(
+            conv_id, mock_ws_row.id, user_id=user_id
+        )
+        conv_repo.update_title.assert_awaited_once_with(conv_id, "Renamed Conversation")
+        session.commit.assert_awaited_once()
+
+    async def test_not_found_raises(self, service, user_id, mock_ws_row):
+        session = AsyncMock()
+        conv_id = uuid.uuid4()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row)
+        conv_repo = _mock_conv_repo(conv=None)
+
+        with _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo), pytest.raises(NotFoundError):
+            await service.rename_conversation(user_id, "ws", conv_id, "New Title", session)
+
+        conv_repo.update_title.assert_not_awaited()
+
+    async def test_workspace_not_found_raises(self, service, user_id):
+        session = AsyncMock()
+        ws_repo = _mock_ws_repo(ws_row=None)
+        conv_repo = _mock_conv_repo(conv=None)
+
+        with _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo), pytest.raises(NotFoundError):
+            await service.rename_conversation(
+                user_id, "missing-workspace", uuid.uuid4(), "New Title", session
+            )
+
+        conv_repo.get_conversation_for_workspace.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

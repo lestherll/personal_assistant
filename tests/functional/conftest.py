@@ -143,6 +143,10 @@ async def http_client_realdb(
 
     with (
         patch("personal_assistant.core.agent.create_agent", return_value=mock_graph),
+        patch(
+            "personal_assistant.services.agent_service._generate_title",
+            new=AsyncMock(return_value="Mock Conversation Title"),
+        ),
         patch.object(
             app.state.workspace_service,
             "_route",

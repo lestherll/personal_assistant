@@ -261,6 +261,29 @@ async def test_list_conversations_response_shape(
     uuid.UUID(first["workspace_id"])
 
 
+async def test_rename_conversation_updates_title(
+    http_client_realdb: httpx.AsyncClient,
+) -> None:
+    chat = await http_client_realdb.post(
+        "/workspaces/default/chat",
+        json={"message": "Please rename this chat.", "agent_name": "Assistant"},
+    )
+    assert chat.status_code == 200
+    conversation_id = chat.json()["conversation_id"]
+
+    rename = await http_client_realdb.patch(
+        f"/workspaces/default/conversations/{conversation_id}",
+        json={"title": "Renamed Conversation"},
+    )
+    assert rename.status_code == 204
+
+    listed = await http_client_realdb.get("/workspaces/default/conversations")
+    assert listed.status_code == 200
+    conv = next((c for c in listed.json() if c["id"] == conversation_id), None)
+    assert conv is not None
+    assert conv["title"] == "Renamed Conversation"
+
+
 # ---------------------------------------------------------------------------
 # Agent participation (Tier 1 — error cases)
 # ---------------------------------------------------------------------------

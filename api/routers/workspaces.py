@@ -26,6 +26,7 @@ from api.schemas import (
 )
 from api.streaming import sse_event_generator
 from personal_assistant.services.agent_service import AgentService
+from personal_assistant.services.exceptions import ServiceValidationError
 from personal_assistant.services.schemas import (
     CreateWorkspaceRequest,
     UpdateWorkspaceRequest,
@@ -37,7 +38,15 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 
 WorkspaceServiceDep = Annotated[WorkspaceService, Depends(get_workspace_service)]
 AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
-DbSessionDep = Annotated[AsyncSession, Depends(get_db_session)]
+DbSessionDep = Annotated[AsyncSession | None, Depends(get_db_session)]
+
+
+def _require_session(session: AsyncSession | None) -> AsyncSession:
+    if session is None:
+        raise ServiceValidationError(
+            "Database not configured. Set DATABASE_URL to enable conversation renaming."
+        )
+    return session
 
 
 @router.post("/", response_model=WorkspaceResponse, status_code=status.HTTP_201_CREATED)
@@ -231,4 +240,5 @@ async def rename_conversation(
     db: DbSessionDep,
     agent_service: AgentServiceDep,
 ) -> None:
-    await agent_service.rename_conversation(user.id, name, conversation_id, body.title, db)
+    session = _require_session(db)
+    await agent_service.rename_conversation(user.id, name, conversation_id, body.title, session)
