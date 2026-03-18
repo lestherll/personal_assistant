@@ -45,7 +45,7 @@ Implemented: `GET /providers/{name}/health` with Ollama-specific `/api/tags` che
 ### ~~Pagination on list endpoints~~ ✓
 Implemented: `skip`/`limit` query params added to list endpoints with repository `.offset().limit()` and tests covering unit and functional pagination.
 
-### Usage analytics endpoints
+### ~~Usage analytics endpoints~~ ✓
 **What:** `GET /usage/summary` and `GET /usage/by-agent` — aggregate token counts and estimated cost grouped by workspace, agent, provider, and time period. The raw data already exists in `Message.prompt_tokens` / `Message.completion_tokens` / `Message.provider` / `Message.model`.
 **Why:** Users have no visibility into how much they're using the system or which agents are most active. The data is already being collected (migration 0008) but never surfaced.
 **Where:** New `api/routers/usage.py`, new `services/usage_service.py`, SQL aggregates on the `messages` table

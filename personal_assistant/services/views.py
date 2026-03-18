@@ -78,3 +78,29 @@ class ProviderView:
 class ProviderModelsView:
     name: str
     models: list[str]
+
+
+@dataclass(frozen=True)
+class UsageSummaryView:
+    workspace: str
+    provider: str | None
+    model: str | None
+    period_start: datetime
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float
+
+
+@dataclass(frozen=True)
+class UsageByAgentView:
+    workspace: str
+    agent_id: uuid.UUID
+    agent_name: str
+    provider: str | None
+    model: str | None
+    period_start: datetime
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float
