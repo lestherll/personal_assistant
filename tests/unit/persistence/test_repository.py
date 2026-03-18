@@ -106,6 +106,20 @@ class TestTouchConversation:
         mock_session.commit.assert_not_awaited()
 
 
+class TestUpdateTitle:
+    async def test_executes_update_and_flushes(self, repo, mock_session):
+        conv_id = uuid.uuid4()
+        await repo.update_title(conv_id, "Renamed")
+
+        mock_session.execute.assert_awaited_once()
+        stmt = mock_session.execute.call_args.args[0]
+        sql = str(stmt)
+        assert "UPDATE conversations" in sql
+        assert "title" in sql
+        assert "WHERE conversations.id" in sql
+        mock_session.flush.assert_awaited_once()
+
+
 class TestLoadMessages:
     async def test_returns_list_of_messages(self, repo, mock_session):
         msg1 = MagicMock(spec=Message)

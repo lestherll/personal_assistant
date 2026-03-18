@@ -382,6 +382,7 @@ def make_conv_view(conv_id: uuid.UUID | None = None) -> ConversationView:
         user_id=None,
         created_at=_NOW,
         updated_at=_NOW,
+        title="Test Conversation",
     )
 
 

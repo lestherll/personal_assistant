@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import uuid
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 
@@ -349,3 +350,110 @@ async def test_workspace_chat_stream_validation_error_returns_422(
     )
     response = await api_client.post("/workspaces/ws1/chat/stream", json={"message": "hello"})
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# PATCH /workspaces/{name}/conversations/{conversation_id} — rename
+# ---------------------------------------------------------------------------
+
+
+async def test_rename_conversation_returns_204_with_db(
+    mock_workspace_service: MagicMock,
+    mock_agent_service: MagicMock,
+) -> None:
+    from fastapi import FastAPI
+    from httpx import ASGITransport
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from api.dependencies import (
+        DEV_USER,
+        get_agent_service,
+        get_current_user,
+        get_db_session,
+        get_workspace_service,
+    )
+    from api.exception_handlers import register_exception_handlers
+    from api.routers import workspaces
+
+    conv_id = uuid.uuid4()
+    mock_db = MagicMock(spec=AsyncSession)
+    mock_agent_service.rename_conversation = AsyncMock(return_value=None)
+
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.include_router(workspaces.router)
+    app.dependency_overrides[get_workspace_service] = lambda: mock_workspace_service
+    app.dependency_overrides[get_agent_service] = lambda: mock_agent_service
+    app.dependency_overrides[get_db_session] = lambda: mock_db
+    app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.patch(
+            f"/workspaces/ws1/conversations/{conv_id}",
+            json={"title": "My Chat"},
+        )
+
+    assert response.status_code == 204
+    mock_agent_service.rename_conversation.assert_awaited_once_with(
+        DEV_USER.id, "ws1", conv_id, "My Chat", mock_db
+    )
+
+
+async def test_rename_conversation_not_found_returns_404_with_db(
+    mock_workspace_service: MagicMock,
+    mock_agent_service: MagicMock,
+) -> None:
+    from fastapi import FastAPI
+    from httpx import ASGITransport
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from api.dependencies import (
+        DEV_USER,
+        get_agent_service,
+        get_current_user,
+        get_db_session,
+        get_workspace_service,
+    )
+    from api.exception_handlers import register_exception_handlers
+    from api.routers import workspaces
+
+    conv_id = uuid.uuid4()
+    mock_db = MagicMock(spec=AsyncSession)
+    mock_agent_service.rename_conversation = AsyncMock(
+        side_effect=NotFoundError("conversation", str(conv_id))
+    )
+
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.include_router(workspaces.router)
+    app.dependency_overrides[get_workspace_service] = lambda: mock_workspace_service
+    app.dependency_overrides[get_agent_service] = lambda: mock_agent_service
+    app.dependency_overrides[get_db_session] = lambda: mock_db
+    app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.patch(
+            f"/workspaces/ws1/conversations/{conv_id}",
+            json={"title": "My Chat"},
+        )
+
+    assert response.status_code == 404
+
+
+async def test_rename_conversation_without_db_returns_422(
+    api_client: httpx.AsyncClient,
+    mock_agent_service: MagicMock,
+) -> None:
+    conv_id = uuid.uuid4()
+    response = await api_client.patch(
+        f"/workspaces/ws1/conversations/{conv_id}",
+        json={"title": "My Chat"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"] == "validation_error"
+    mock_agent_service.rename_conversation.assert_not_awaited()
