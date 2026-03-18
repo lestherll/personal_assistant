@@ -157,3 +157,61 @@ class TestWorkspaceSupervisorRun:
         supervisor = WorkspaceSupervisor([], llm)
         with pytest.raises(RuntimeError, match="No agents"):
             await supervisor.run("hi")
+
+    @pytest.mark.asyncio
+    async def test_run_falls_back_to_first_agent_on_invalid_decision(self) -> None:
+        alpha = make_mock_agent("Alpha")
+        beta = make_mock_agent("Beta")
+        alpha.run_with_context = AsyncMock(
+            return_value=[HumanMessage(content="hi"), AIMessage(content="from alpha")]
+        )
+        beta.run_with_context = AsyncMock(
+            return_value=[HumanMessage(content="hi"), AIMessage(content="from beta")]
+        )
+
+        llm = make_mock_llm()
+        llm.with_structured_output.return_value.ainvoke.return_value = MagicMock(
+            next_agent="unknown-agent"
+        )
+        supervisor = WorkspaceSupervisor([alpha, beta], llm)
+
+        response, _, agent_used = await supervisor.run("hi", thread_id="t1")
+
+        assert response == "from alpha"
+        assert agent_used == "Alpha"
+        alpha.run_with_context.assert_awaited_once()
+        beta.run_with_context.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_run_end_decision_returns_empty_response(self) -> None:
+        alpha = make_mock_agent("Alpha")
+        alpha.run_with_context = AsyncMock()
+        llm = make_mock_llm()
+        llm.with_structured_output.return_value.ainvoke.return_value = MagicMock(
+            next_agent="__end__"
+        )
+        supervisor = WorkspaceSupervisor([alpha], llm)
+
+        response, _, agent_used = await supervisor.run("hi", thread_id="t1")
+
+        assert response == ""
+        assert agent_used == ""
+        alpha.run_with_context.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_run_coerces_non_string_ai_content(self) -> None:
+        agent = make_mock_agent("Alpha")
+        llm = make_mock_llm()
+        mock_graph = MagicMock()
+        mock_graph.ainvoke = AsyncMock(
+            return_value={
+                "messages": [HumanMessage(content="hi"), AIMessage(content=["hello", "world"])],
+                "agent_used": "Alpha",
+            }
+        )
+        supervisor = WorkspaceSupervisor([agent], llm)
+        supervisor._graph = mock_graph
+
+        response, _, _ = await supervisor.run("hi", thread_id="t1")
+
+        assert response == "['hello', 'world']"
