@@ -70,11 +70,8 @@ Implemented: Alembic migration `0010_add_conversation_title.py`; `Conversation.t
 **Where:** New Alembic migration, `persistence/models.py`, new `services/tool_service.py`, `api/routers/tools.py`, update `AgentService` to resolve tools from DB
 **Effort:** L | **Priority:** P2
 
-### API key rotation / re-generation
-**What:** `POST /auth/api-keys/{id}/rotate` — revoke the existing key and generate a new one in a single atomic operation. Returns the new raw key.
-**Why:** Key rotation is a security best practice. Currently, users must manually delete and recreate keys, which creates a window where no key is active. Rotation makes this seamless.
-**Where:** `api/routers/auth.py`, `persistence/api_key_repository.py`
-**Effort:** S | **Priority:** P2
+### ~~API key rotation / re-generation~~ ✓
+Implemented: `POST /auth/api-keys/{id}/rotate` in `api/routers/auth.py` + atomic `APIKeyRepository.rotate()` (revokes active key, creates replacement key row in one transaction) with unit coverage in router and persistence tests.
 
 ---
 

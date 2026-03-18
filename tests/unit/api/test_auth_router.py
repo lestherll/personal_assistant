@@ -265,3 +265,29 @@ class TestRevokeApiKeyEndpoint:
             MockRepo.return_value.revoke = AsyncMock(return_value=False)
             resp = await api_key_client.delete(f"/auth/api-keys/{key_id}")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/api-keys/{key_id}/rotate
+# ---------------------------------------------------------------------------
+
+
+class TestRotateApiKeyEndpoint:
+    async def test_rotate_returns_200_with_new_key(self, api_key_client: httpx.AsyncClient) -> None:
+        key_id = uuid.uuid4()
+        row = _make_api_key_row(_DEV_USER.id)
+        with patch("api.routers.auth.APIKeyRepository") as MockRepo:
+            MockRepo.return_value.rotate = AsyncMock(return_value=row)
+            resp = await api_key_client.post(f"/auth/api-keys/{key_id}/rotate")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["key"].startswith("sk-")
+        assert data["api_key"]["id"] == str(row.id)
+        MockRepo.return_value.rotate.assert_awaited_once()
+
+    async def test_rotate_not_found_returns_404(self, api_key_client: httpx.AsyncClient) -> None:
+        key_id = uuid.uuid4()
+        with patch("api.routers.auth.APIKeyRepository") as MockRepo:
+            MockRepo.return_value.rotate = AsyncMock(return_value=None)
+            resp = await api_key_client.post(f"/auth/api-keys/{key_id}/rotate")
+        assert resp.status_code == 404

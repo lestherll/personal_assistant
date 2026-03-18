@@ -147,3 +147,24 @@ async def revoke_api_key(
     if not revoked:
         raise NotFoundError("api_key", str(key_id))
     await db.commit()
+
+
+@router.post("/api-keys/{key_id}/rotate", response_model=CreateAPIKeyResponse)
+async def rotate_api_key(
+    key_id: uuid.UUID,
+    user: CurrentUserDep,
+    session: DbSessionDep,
+) -> CreateAPIKeyResponse:
+    db = _require_session(session)
+    raw_key, key_hash = generate_api_key()
+    repo = APIKeyRepository(db)
+    row = await repo.rotate(
+        user_id=user.id,
+        key_id=key_id,
+        new_key_hash=key_hash,
+        new_key_prefix=raw_key[:11],
+    )
+    if row is None:
+        raise NotFoundError("api_key", str(key_id))
+    await db.commit()
+    return CreateAPIKeyResponse(key=raw_key, api_key=_api_key_response(row))

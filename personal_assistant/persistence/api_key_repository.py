@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from personal_assistant.persistence.models import UserAPIKey
@@ -60,6 +60,42 @@ class APIKeyRepository:
         )
         await self._session.flush()
         return result.rowcount > 0  # type: ignore
+
+    async def rotate(
+        self,
+        user_id: uuid.UUID,
+        key_id: uuid.UUID,
+        *,
+        new_key_hash: str,
+        new_key_prefix: str,
+    ) -> UserAPIKey | None:
+        now = datetime.now(UTC)
+        result = await self._session.execute(
+            select(UserAPIKey)
+            .where(
+                UserAPIKey.id == key_id,
+                UserAPIKey.user_id == user_id,
+                UserAPIKey.is_active.is_(True),
+                or_(UserAPIKey.expires_at.is_(None), UserAPIKey.expires_at >= now),
+            )
+            .with_for_update()
+        )
+        current = result.scalar_one_or_none()
+        if current is None:
+            return None
+
+        current.is_active = False
+        row = UserAPIKey(
+            user_id=current.user_id,
+            name=current.name,
+            key_hash=new_key_hash,
+            key_prefix=new_key_prefix,
+            expires_at=current.expires_at,
+        )
+        self._session.add(row)
+        await self._session.flush()
+        await self._session.refresh(row)
+        return row
 
     async def update_last_used(self, key_id: uuid.UUID, now: datetime) -> None:
         await self._session.execute(

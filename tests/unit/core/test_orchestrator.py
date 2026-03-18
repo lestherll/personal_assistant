@@ -1,10 +1,10 @@
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from personal_assistant.core.agent import AgentConfig, AgentRunResult
 from personal_assistant.core.orchestrator import Orchestrator
-from personal_assistant.core.workspace import WorkspaceConfig
+from personal_assistant.core.workspace import Workspace, WorkspaceConfig
 from personal_assistant.providers.registry import ProviderRegistry
 from tests.unit.conftest import make_mock_graph, make_mock_provider
 from tests.unit.core.test_workspace import make_mock_agent
@@ -60,6 +60,27 @@ class TestWorkspaceManagement:
         assert orchestrator.active_workspace is ws
 
     def test_active_workspace_none_when_empty(self, orchestrator) -> None:
+        assert orchestrator.active_workspace is None
+
+    def test_add_workspace_sets_active_when_empty(self, orchestrator) -> None:
+        ws = Workspace(WorkspaceConfig(name="added", description=""))
+        orchestrator.add_workspace(ws)
+        assert orchestrator._active_workspace == "added"
+
+    def test_remove_active_workspace_reassigns_to_remaining(self, orchestrator) -> None:
+        orchestrator.create_workspace(WorkspaceConfig(name="ws1", description=""))
+        orchestrator.create_workspace(WorkspaceConfig(name="ws2", description=""))
+        orchestrator.set_active_workspace("ws1")
+
+        orchestrator.remove_workspace("ws1")
+
+        assert orchestrator._active_workspace == "ws2"
+
+    def test_remove_last_workspace_clears_active(self, orchestrator) -> None:
+        orchestrator.create_workspace(WorkspaceConfig(name="solo", description=""))
+
+        orchestrator.remove_workspace("solo")
+
         assert orchestrator.active_workspace is None
 
 
@@ -175,6 +196,26 @@ class TestAgentHelpers:
         with pytest.raises(RuntimeError, match="No active workspace"):
             orchestrator.create_agent(config)
 
+    def test_replace_agent_no_workspace_raises(self, orchestrator) -> None:
+        config = AgentConfig(name="Bot", description="", system_prompt="")
+        with pytest.raises(RuntimeError, match="No active workspace"):
+            orchestrator.replace_agent(config)
+
+    def test_get_or_create_agent_no_workspace_raises(self, orchestrator) -> None:
+        config = AgentConfig(name="Bot", description="", system_prompt="")
+        with pytest.raises(RuntimeError, match="No active workspace"):
+            orchestrator.get_or_create_agent(config)
+
+    def test_get_or_create_agent_delegates_to_workspace(
+        self, orchestrator, workspace_config
+    ) -> None:
+        orchestrator.create_workspace(workspace_config)
+        config = AgentConfig(name="Bot", description="", system_prompt="")
+        mock = make_mock_graph()
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock):
+            agent = orchestrator.get_or_create_agent(config)
+        assert agent.config.name == "Bot"
+
 
 class TestUnmanagedAgent:
     def test_create_unmanaged_agent_returns_agent(self, orchestrator) -> None:
@@ -215,3 +256,27 @@ class TestUnmanagedAgent:
             agent = orchestrator.create_unmanaged_agent(config)
         # Agent should have access to the registry
         assert agent._registry is orchestrator.registry
+
+
+class TestWorkspaceDelegation:
+    async def test_delegate_to_workspace_returns_tuple(
+        self, orchestrator, workspace_config
+    ) -> None:
+        ws = orchestrator.create_workspace(workspace_config)
+        ws.delegate = AsyncMock(return_value=("reply", "thread-1", "Alpha"))  # type: ignore[attr-defined]
+
+        result = await orchestrator.delegate_to_workspace("hi")
+
+        assert result == ("reply", "thread-1", "Alpha")
+
+    async def test_delegate_to_workspace_no_workspace_raises(self, orchestrator) -> None:
+        with pytest.raises(RuntimeError, match="No active workspace"):
+            await orchestrator.delegate_to_workspace("hi")
+
+
+class TestRepr:
+    def test_repr_includes_active_workspace(self, orchestrator, workspace_config) -> None:
+        orchestrator.create_workspace(workspace_config)
+        rendered = repr(orchestrator)
+        assert "Orchestrator(" in rendered
+        assert "active='test'" in rendered
