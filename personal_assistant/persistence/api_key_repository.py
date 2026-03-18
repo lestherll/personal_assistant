@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from personal_assistant.persistence.models import UserAPIKey
@@ -69,12 +69,14 @@ class APIKeyRepository:
         new_key_hash: str,
         new_key_prefix: str,
     ) -> UserAPIKey | None:
+        now = datetime.now(UTC)
         result = await self._session.execute(
             select(UserAPIKey)
             .where(
                 UserAPIKey.id == key_id,
                 UserAPIKey.user_id == user_id,
                 UserAPIKey.is_active.is_(True),
+                or_(UserAPIKey.expires_at.is_(None), UserAPIKey.expires_at >= now),
             )
             .with_for_update()
         )

@@ -169,6 +169,10 @@ class TestRotate:
         mock_session.add.assert_not_called()
         mock_session.flush.assert_not_awaited()
         mock_session.refresh.assert_not_awaited()
+        stmt = mock_session.execute.call_args.args[0]
+        sql = str(stmt)
+        assert "expires_at" in sql
+        assert "IS NULL" in sql
 
 
 class TestUpdateLastUsed:
