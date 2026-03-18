@@ -58,11 +58,8 @@ Implemented: `GET /providers/{name}/health` with Ollama-specific `/api/tags` che
 
 ## Product features (P2)
 
-### LLM-generated conversation titles
-**What:** After the first AI response in a new conversation, fire a background LLM call to generate a 5-7 word title and save it to a new `title` column on the `Conversation` model. Requires one Alembic migration. Title generation failure must be non-fatal — the chat response is already delivered before this runs.
-**Why:** Every conversation is currently identified only by UUID. A chat UI sidebar is unusable without titles. Auto-generation means zero friction — titles appear without the user doing anything.
-**Where:** New Alembic migration, `persistence/models.py` (`Conversation.title`), `services/agent_service.py` (`run_agent` / `stream_agent` — trigger after turn 1), new lightweight title-generation helper
-**Effort:** M | **Priority:** P2
+### ~~LLM-generated conversation titles~~ ✓
+Implemented: Alembic migration `0010_add_conversation_title.py`; `Conversation.title` storage + API/view exposure; first-turn auto-title generation in `AgentService.run_agent()` and `stream_agent()`; manual rename endpoint at `PATCH /workspaces/{name}/conversations/{conversation_id}` with ownership checks and DB-session validation.
 
 ### Workspace template system
 **What:** DB-seeded workspace templates browsable via `GET /templates/` and installable via `POST /templates/{id}/install`. Installing a template creates a new `UserWorkspace` and `UserAgent` rows from the template's agent definitions, analogous to `fork_default_workspace` in `AuthService`. New DB tables: `workspace_templates` and `template_agents`.
