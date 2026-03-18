@@ -24,6 +24,12 @@ class TokenRate:
 
 
 _DEFAULT_PRICING: dict[tuple[str, str | None], TokenRate] = {
+    ("anthropic", "claude-haiku-4-5-20251001"): TokenRate(
+        prompt_per_1k=0.0008, completion_per_1k=0.004
+    ),
+    ("anthropic", "claude-sonnet-4-5"): TokenRate(prompt_per_1k=0.003, completion_per_1k=0.015),
+    ("anthropic", "claude-opus-4-6"): TokenRate(prompt_per_1k=0.015, completion_per_1k=0.075),
+    ("anthropic", None): TokenRate(prompt_per_1k=0.003, completion_per_1k=0.015),
     ("ollama", None): TokenRate(prompt_per_1k=0.0, completion_per_1k=0.0),
 }
 
@@ -235,10 +241,10 @@ class UsageService:
             if period == "day":
                 return func.date(Message.created_at)
             if period == "week":
-                return func.date(Message.created_at, "weekday 1", "-7 days")
+                return func.date(Message.created_at, "weekday 0", "-6 days")
             if period == "month":
                 return func.strftime("%Y-%m-01", Message.created_at)
-        return func.date_trunc(period, Message.created_at)
+        return func.date_trunc(period, func.timezone("UTC", Message.created_at))
 
     def _coerce_period_start(self, value: Any) -> datetime:
         if isinstance(value, datetime):
