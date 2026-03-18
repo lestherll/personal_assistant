@@ -11,6 +11,8 @@ from personal_assistant.persistence.repository import AgentParticipationView
 from personal_assistant.services.views import (
     AgentView,
     ConversationView,
+    UsageByAgentView,
+    UsageSummaryView,
     WorkspaceDetailView,
     WorkspaceView,
 )
@@ -143,6 +145,38 @@ class ProviderResponse(BaseModel):
 class ProviderModelsResponse(BaseModel):
     name: str
     models: list[str]
+
+
+class UsageSummaryResponse(BaseModel):
+    workspace: str
+    provider: str | None
+    model: str | None
+    period_start: datetime
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float
+
+    @classmethod
+    def from_view(cls, view: UsageSummaryView) -> UsageSummaryResponse:
+        return cls(**dataclasses.asdict(view))
+
+
+class UsageByAgentResponse(BaseModel):
+    workspace: str
+    agent_id: uuid.UUID
+    agent_name: str
+    provider: str | None
+    model: str | None
+    period_start: datetime
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    estimated_cost_usd: float
+
+    @classmethod
+    def from_view(cls, view: UsageByAgentView) -> UsageByAgentResponse:
+        return cls(**dataclasses.asdict(view))
 
 
 class ErrorResponse(BaseModel):

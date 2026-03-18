@@ -19,6 +19,7 @@ from personal_assistant.providers.registry import ProviderRegistry
 from personal_assistant.services.agent_service import AgentService
 from personal_assistant.services.auth_service import AuthService
 from personal_assistant.services.exceptions import AuthError
+from personal_assistant.services.usage_service import UsageService
 from personal_assistant.services.workspace_service import WorkspaceService
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
@@ -54,6 +55,11 @@ def get_agent_service(request: Request) -> AgentService:
 def get_workspace_service(request: Request) -> WorkspaceService:
     """Return the application-scoped WorkspaceService singleton from app.state."""
     return cast(WorkspaceService, request.app.state.workspace_service)
+
+
+def get_usage_service(request: Request) -> UsageService:
+    """Return the application-scoped UsageService singleton from app.state."""
+    return cast(UsageService, request.app.state.usage_service)
 
 
 async def get_db_session(request: Request) -> AsyncIterator[AsyncSession | None]:

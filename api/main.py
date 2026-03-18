@@ -8,13 +8,14 @@ from langchain_core.tools import BaseTool
 
 from api.exception_handlers import register_exception_handlers
 from api.rate_limit import RateLimiter
-from api.routers import agents, auth, health, providers, workspaces
+from api.routers import agents, auth, health, providers, usage, workspaces
 from personal_assistant.bootstrap import build_registry
 from personal_assistant.config import get_settings
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.persistence.database import build_engine, build_session_factory
 from personal_assistant.services.agent_service import AgentService
 from personal_assistant.services.conversation_cache import InMemoryConversationCache
+from personal_assistant.services.usage_service import UsageService
 from personal_assistant.services.workspace_service import WorkspaceService
 from personal_assistant.tools.example_tool import AgentInformationTool, EchoTool
 from personal_assistant.tools.indeed_tool import IndeedJobSearchTool
@@ -47,8 +48,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     cache = InMemoryConversationCache(max_size=1000)
     agent_service = AgentService(registry, tools, cache)
     workspace_service = WorkspaceService(registry, agent_service)
+    usage_service = UsageService()
     app.state.agent_service = agent_service
     app.state.workspace_service = workspace_service
+    app.state.usage_service = usage_service
     app.state.rate_limiter = RateLimiter(max_requests=60, window_seconds=60)
 
     # --- Persistence (optional) ---
@@ -71,4 +74,5 @@ app.include_router(auth.router)
 app.include_router(workspaces.router)
 app.include_router(agents.router)
 app.include_router(providers.router)
+app.include_router(usage.router)
 app.include_router(health.router)
