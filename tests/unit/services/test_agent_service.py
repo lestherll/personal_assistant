@@ -234,6 +234,17 @@ class TestListAgents:
         with _patch_ws_repo(ws_repo), pytest.raises(NotFoundError):
             await service.list_agents(user_id, "ghost", session=session)
 
+    async def test_passes_pagination_to_repository(
+        self, service, user_id, mock_ws_row, mock_agent_row
+    ):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row, agent_rows=[mock_agent_row])
+
+        with _patch_ws_repo(ws_repo):
+            await service.list_agents(user_id, "ws", skip=4, limit=11, session=session)
+
+        ws_repo.list_agents.assert_awaited_once_with(mock_ws_row.id, skip=4, limit=11)
+
 
 # ---------------------------------------------------------------------------
 # CRUD: get_agent
@@ -720,6 +731,22 @@ class TestListConversations:
         session = MagicMock()
         with pytest.raises(NotFoundError):
             await service.list_conversations(None, "ws", session=session)
+
+    async def test_passes_pagination_to_repository(self, service, user_id, mock_ws_row):
+        session = MagicMock()
+        conv = _make_mock_conv(workspace_id=mock_ws_row.id, user_id=user_id)
+        ws_repo = _mock_ws_repo(ws_row=mock_ws_row)
+        conv_repo = _mock_conv_repo(conv=conv)
+
+        with _patch_ws_repo(ws_repo), _patch_conv_repo(conv_repo):
+            await service.list_conversations(user_id, "ws", session=session, skip=6, limit=15)
+
+        conv_repo.list_conversations.assert_awaited_once_with(
+            mock_ws_row.id,
+            user_id=user_id,
+            skip=6,
+            limit=15,
+        )
 
 
 # ---------------------------------------------------------------------------

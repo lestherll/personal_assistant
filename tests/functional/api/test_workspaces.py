@@ -19,6 +19,13 @@ async def test_list_workspaces_includes_default(http_client: httpx.AsyncClient) 
     assert "default" in names
 
 
+async def test_list_workspaces_respects_limit(http_client: httpx.AsyncClient) -> None:
+    response = await http_client.get("/workspaces/?limit=1")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
 async def test_create_workspace_returns_201(http_client: httpx.AsyncClient) -> None:
     response = await http_client.post(
         "/workspaces/",
@@ -259,6 +266,23 @@ async def test_list_conversations_response_shape(
     assert "updated_at" in first
     assert "workspace_name" not in first
     uuid.UUID(first["workspace_id"])
+
+
+async def test_list_conversations_respects_limit(
+    http_client_realdb: httpx.AsyncClient,
+) -> None:
+    await http_client_realdb.post(
+        "/workspaces/default/chat",
+        json={"message": "Pagination message 1", "agent_name": "Assistant"},
+    )
+    await http_client_realdb.post(
+        "/workspaces/default/chat",
+        json={"message": "Pagination message 2", "agent_name": "Assistant"},
+    )
+
+    response = await http_client_realdb.get("/workspaces/default/conversations?limit=1")
+    assert response.status_code == 200
+    assert len(response.json()) == 1
 
 
 async def test_rename_conversation_updates_title(

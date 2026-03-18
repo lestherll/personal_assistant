@@ -14,7 +14,7 @@ from api.dependencies import (
     get_workspace_service,
     rate_limit_chat,
 )
-from api.routers.params import WorkspaceName
+from api.routers.params import PaginationLimit, PaginationSkip, WorkspaceName
 from api.schemas import (
     AgentParticipationResponse,
     ConversationResponse,
@@ -71,8 +71,10 @@ async def list_workspaces(
     service: WorkspaceServiceDep,
     db: DbSessionDep,
     current_user: CurrentUserDep,
+    skip: PaginationSkip = 0,
+    limit: PaginationLimit = 50,
 ) -> list[WorkspaceResponse]:
-    views = await service.list_workspaces(current_user.id, session=db)
+    views = await service.list_workspaces(current_user.id, skip=skip, limit=limit, session=db)
     return [WorkspaceResponse.from_view(v) for v in views]
 
 
@@ -176,10 +178,14 @@ async def list_workspace_conversations(
     agent_service: AgentServiceDep,
     db: DbSessionDep,
     current_user: CurrentUserDep,
+    skip: PaginationSkip = 0,
+    limit: PaginationLimit = 50,
 ) -> list[ConversationResponse]:
     if db is None:
         return []
-    views = await agent_service.list_conversations(current_user.id, name, db)
+    views = await agent_service.list_conversations(
+        current_user.id, name, db, skip=skip, limit=limit
+    )
     return [ConversationResponse.from_view(v) for v in views]
 
 

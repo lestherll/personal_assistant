@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.dependencies import CurrentUserDep, get_agent_service, get_db_session, rate_limit_chat
-from api.routers.params import AgentName, WorkspaceName
+from api.routers.params import AgentName, PaginationLimit, PaginationSkip, WorkspaceName
 from api.schemas import AgentResponse, ChatResponse, ConversationResponse
 from api.streaming import sse_event_generator
 from personal_assistant.services.agent_service import AgentService
@@ -55,8 +55,12 @@ async def list_agents(
     service: AgentServiceDep,
     db: DbSessionDep,
     current_user: CurrentUserDep,
+    skip: PaginationSkip = 0,
+    limit: PaginationLimit = 50,
 ) -> list[AgentResponse]:
-    views = await service.list_agents(current_user.id, workspace_name, session=db)
+    views = await service.list_agents(
+        current_user.id, workspace_name, skip=skip, limit=limit, session=db
+    )
     return [AgentResponse.from_view(v) for v in views]
 
 
@@ -160,10 +164,18 @@ async def list_conversations(
     service: AgentServiceDep,
     db: DbSessionDep,
     current_user: CurrentUserDep,
+    skip: PaginationSkip = 0,
+    limit: PaginationLimit = 50,
 ) -> list[ConversationResponse]:
     if db is None:
         return []
-    views = await service.list_conversations(current_user.id, workspace_name, db)
+    views = await service.list_conversations(
+        current_user.id,
+        workspace_name,
+        db,
+        skip=skip,
+        limit=limit,
+    )
     return [ConversationResponse.from_view(v) for v in views]
 
 

@@ -42,11 +42,8 @@ Implemented: `GET /workspaces/{name}/conversations/{conversation_id}/messages`.
 ### ~~Provider health check endpoint~~ ✓
 Implemented: `GET /providers/{name}/health` with Ollama-specific `/api/tags` check.
 
-### Pagination on list endpoints
-**What:** Add `skip: int = 0, limit: int = 50` query parameters to `list_conversations`, `list_agents`, `list_workspaces`, and the new cross-workspace conversation list. Apply `.offset(skip).limit(limit)` in the repository queries.
-**Why:** All list endpoints currently return unbounded results. A user with 500 conversations gets all 500 in one response. At scale this causes slow queries, large payloads, and client-side rendering issues.
-**Where:** All `list_*` methods in `persistence/repository.py` and `persistence/user_workspace_repository.py`, corresponding service methods, API router query params
-**Effort:** S | **Priority:** P2
+### ~~Pagination on list endpoints~~ ✓
+Implemented: `skip`/`limit` query params added to list endpoints with repository `.offset().limit()` and tests covering unit and functional pagination.
 
 ### Usage analytics endpoints
 **What:** `GET /usage/summary` and `GET /usage/by-agent` — aggregate token counts and estimated cost grouped by workspace, agent, provider, and time period. The raw data already exists in `Message.prompt_tokens` / `Message.completion_tokens` / `Message.provider` / `Message.model`.

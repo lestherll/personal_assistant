@@ -98,6 +98,23 @@ async def test_list_workspaces_empty(
     assert response.json() == []
 
 
+async def test_list_workspaces_passes_pagination(
+    api_client: httpx.AsyncClient, mock_workspace_service: MagicMock
+) -> None:
+    from api.dependencies import DEV_USER
+
+    mock_workspace_service.list_workspaces.return_value = []
+    response = await api_client.get("/workspaces/?skip=2&limit=7")
+
+    assert response.status_code == 200
+    mock_workspace_service.list_workspaces.assert_awaited_once()
+    call_args = mock_workspace_service.list_workspaces.call_args
+    assert call_args.args[0] == DEV_USER.id
+    assert call_args.kwargs["skip"] == 2
+    assert call_args.kwargs["limit"] == 7
+    assert call_args.kwargs["session"] is None
+
+
 # ---------------------------------------------------------------------------
 # GET /workspaces/{name} — detail
 # ---------------------------------------------------------------------------
@@ -350,6 +367,65 @@ async def test_workspace_chat_stream_validation_error_returns_422(
     )
     response = await api_client.post("/workspaces/ws1/chat/stream", json={"message": "hello"})
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# GET /workspaces/{name}/conversations
+# ---------------------------------------------------------------------------
+
+
+async def test_list_workspace_conversations_returns_empty_without_db(
+    api_client: httpx.AsyncClient, mock_agent_service: MagicMock
+) -> None:
+    response = await api_client.get("/workspaces/ws1/conversations")
+
+    assert response.status_code == 200
+    assert response.json() == []
+    mock_agent_service.list_conversations.assert_not_called()
+
+
+async def test_list_workspace_conversations_passes_pagination(
+    mock_workspace_service: MagicMock,
+    mock_agent_service: MagicMock,
+) -> None:
+    from fastapi import FastAPI
+    from httpx import ASGITransport
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from api.dependencies import (
+        DEV_USER,
+        get_agent_service,
+        get_current_user,
+        get_db_session,
+        get_workspace_service,
+    )
+    from api.exception_handlers import register_exception_handlers
+    from api.routers import workspaces
+
+    mock_db = MagicMock(spec=AsyncSession)
+    mock_agent_service.list_conversations = AsyncMock(return_value=[])
+
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.include_router(workspaces.router)
+    app.dependency_overrides[get_workspace_service] = lambda: mock_workspace_service
+    app.dependency_overrides[get_agent_service] = lambda: mock_agent_service
+    app.dependency_overrides[get_db_session] = lambda: mock_db
+    app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/workspaces/ws1/conversations?skip=3&limit=9")
+
+    assert response.status_code == 200
+    mock_agent_service.list_conversations.assert_awaited_once_with(
+        DEV_USER.id,
+        "ws1",
+        mock_db,
+        skip=3,
+        limit=9,
+    )
 
 
 # ---------------------------------------------------------------------------

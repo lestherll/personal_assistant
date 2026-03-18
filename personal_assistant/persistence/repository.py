@@ -97,14 +97,20 @@ class ConversationRepository:
         self,
         workspace_id: uuid.UUID,
         user_id: uuid.UUID | None = None,
+        *,
+        skip: int = 0,
+        limit: int | None = None,
     ) -> list[Conversation]:
         """Return all conversations for a workspace, ordered by creation time."""
         conditions = [Conversation.workspace_id == workspace_id]
         if user_id is not None:
             conditions.append(Conversation.user_id == user_id)
-        result = await self._session.execute(
-            select(Conversation).where(*conditions).order_by(Conversation.created_at)
+        stmt = (
+            select(Conversation).where(*conditions).order_by(Conversation.created_at).offset(skip)
         )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
     async def delete_conversation(self, conversation_id: uuid.UUID) -> bool:

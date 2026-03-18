@@ -149,6 +149,15 @@ class TestListWorkspaces:
 
         assert views == []
 
+    async def test_passes_pagination_to_repository(self, service, user_id, mock_ws_row):
+        session = MagicMock()
+        ws_repo = _mock_ws_repo(ws_rows=[mock_ws_row])
+
+        with _patch_ws_repo(ws_repo):
+            await service.list_workspaces(user_id, skip=5, limit=12, session=session)
+
+        ws_repo.list_workspaces.assert_awaited_once_with(user_id, skip=5, limit=12)
+
 
 # ---------------------------------------------------------------------------
 # CRUD: get_workspace
