@@ -26,6 +26,13 @@ async def test_list_agents_in_default_workspace(http_client: httpx.AsyncClient) 
     assert "Assistant" in names
 
 
+async def test_list_agents_respects_limit(http_client: httpx.AsyncClient) -> None:
+    response = await http_client.get("/workspaces/default/agents/?limit=1")
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
+
+
 async def test_get_agent(http_client: httpx.AsyncClient) -> None:
     response = await http_client.get("/workspaces/default/agents/Assistant")
 
@@ -314,6 +321,25 @@ async def test_list_agent_conversations_response_has_workspace_id(
     assert "workspace_id" in first
     # workspace_id must be a valid UUID string — not a workspace name
     uuid.UUID(first["workspace_id"])
+
+
+async def test_list_agent_conversations_respects_limit(
+    http_client_realdb: httpx.AsyncClient,
+) -> None:
+    await http_client_realdb.post(
+        "/workspaces/default/agents/Assistant/chat",
+        json={"message": "Pagination convo 1"},
+    )
+    await http_client_realdb.post(
+        "/workspaces/default/agents/Assistant/chat",
+        json={"message": "Pagination convo 2"},
+    )
+    response = await http_client_realdb.get(
+        "/workspaces/default/agents/Assistant/conversations?limit=1"
+    )
+
+    assert response.status_code == 200
+    assert len(response.json()) == 1
 
 
 async def test_delete_conversation_returns_204(

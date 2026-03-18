@@ -217,6 +217,17 @@ class TestListConversations:
         result = await repo.list_conversations(uuid.uuid4())
         assert result == []
 
+    async def test_applies_offset_and_limit(self, repo, mock_session):
+        ws_id = uuid.uuid4()
+        mock_session.execute.return_value = _scalars_all_result([])
+
+        await repo.list_conversations(ws_id, skip=3, limit=10)
+
+        stmt = mock_session.execute.call_args.args[0]
+        sql = str(stmt)
+        assert "OFFSET" in sql
+        assert "LIMIT" in sql
+
 
 class TestDeleteConversation:
     async def test_deletes_and_returns_true(self, repo, mock_session):

@@ -106,6 +106,24 @@ async def test_list_agents_returns_all(
     assert len(response.json()) == 2
 
 
+async def test_list_agents_passes_pagination(
+    api_client: httpx.AsyncClient, mock_agent_service: MagicMock
+) -> None:
+    from api.dependencies import DEV_USER
+
+    mock_agent_service.list_agents.return_value = []
+    response = await api_client.get("/workspaces/ws1/agents/?skip=1&limit=3")
+
+    assert response.status_code == 200
+    mock_agent_service.list_agents.assert_awaited_once()
+    call_args = mock_agent_service.list_agents.call_args
+    assert call_args.args[0] == DEV_USER.id
+    assert call_args.args[1] == "ws1"
+    assert call_args.kwargs["skip"] == 1
+    assert call_args.kwargs["limit"] == 3
+    assert call_args.kwargs["session"] is None
+
+
 async def test_list_agents_workspace_not_found_returns_404(
     api_client: httpx.AsyncClient, mock_agent_service: MagicMock
 ) -> None:
@@ -473,6 +491,26 @@ async def test_list_conversations_returns_items(
     body = response.json()
     assert len(body) == 1
     assert body[0]["id"] == str(conv_id)
+
+
+async def test_list_conversations_passes_pagination(
+    mock_workspace_service: MagicMock,
+    mock_agent_service: MagicMock,
+) -> None:
+    from api.dependencies import DEV_USER
+
+    mock_agent_service.list_conversations = AsyncMock(return_value=[])
+
+    async with await _make_client_with_db(mock_workspace_service, mock_agent_service) as client:
+        response = await client.get("/workspaces/ws1/agents/Assistant/conversations?skip=4&limit=8")
+
+    assert response.status_code == 200
+    mock_agent_service.list_conversations.assert_awaited_once()
+    call_args = mock_agent_service.list_conversations.call_args
+    assert call_args.args[0] == DEV_USER.id
+    assert call_args.args[1] == "ws1"
+    assert call_args.kwargs["skip"] == 4
+    assert call_args.kwargs["limit"] == 8
 
 
 async def test_list_conversations_agent_not_found_returns_404(

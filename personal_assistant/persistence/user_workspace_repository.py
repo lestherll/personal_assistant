@@ -35,10 +35,22 @@ class UserWorkspaceRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_workspaces(self, user_id: uuid.UUID) -> list[UserWorkspace]:
-        result = await self._session.execute(
-            select(UserWorkspace).where(UserWorkspace.user_id == user_id)
+    async def list_workspaces(
+        self,
+        user_id: uuid.UUID,
+        *,
+        skip: int = 0,
+        limit: int | None = None,
+    ) -> list[UserWorkspace]:
+        stmt = (
+            select(UserWorkspace)
+            .where(UserWorkspace.user_id == user_id)
+            .order_by(UserWorkspace.created_at)
+            .offset(skip)
         )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
     async def delete_workspace(self, user_id: uuid.UUID, name: str) -> bool:
@@ -96,10 +108,22 @@ class UserWorkspaceRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_agents(self, user_workspace_id: uuid.UUID) -> list[UserAgent]:
-        result = await self._session.execute(
-            select(UserAgent).where(UserAgent.user_workspace_id == user_workspace_id)
+    async def list_agents(
+        self,
+        user_workspace_id: uuid.UUID,
+        *,
+        skip: int = 0,
+        limit: int | None = None,
+    ) -> list[UserAgent]:
+        stmt = (
+            select(UserAgent)
+            .where(UserAgent.user_workspace_id == user_workspace_id)
+            .order_by(UserAgent.created_at)
+            .offset(skip)
         )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        result = await self._session.execute(stmt)
         return list(result.scalars().all())
 
     async def delete_agent(self, user_workspace_id: uuid.UUID, name: str) -> bool:

@@ -107,6 +107,9 @@ class AgentService:
         self,
         user_id: uuid.UUID,
         workspace_name: str,
+        *,
+        skip: int = 0,
+        limit: int = 50,
         session: AsyncSession | None = None,
     ) -> list[AgentView]:
         if session is None:
@@ -117,7 +120,7 @@ class AgentService:
         if ws_row is None:
             raise NotFoundError("workspace", workspace_name)
 
-        rows = await repo.list_agents(ws_row.id)
+        rows = await repo.list_agents(ws_row.id, skip=skip, limit=limit)
         return [self._row_to_view(r) for r in rows]
 
     async def get_agent(
@@ -306,6 +309,9 @@ class AgentService:
         user_id: uuid.UUID | None,
         workspace_name: str,
         session: AsyncSession,
+        *,
+        skip: int = 0,
+        limit: int = 50,
     ) -> list[ConversationView]:
         """List all conversations for a workspace (requires DB session)."""
         if user_id is None:
@@ -317,7 +323,12 @@ class AgentService:
             raise NotFoundError("workspace", workspace_name)
 
         conv_repo = ConversationRepository(session)
-        convs = await conv_repo.list_conversations(ws_row.id, user_id=user_id)
+        convs = await conv_repo.list_conversations(
+            ws_row.id,
+            user_id=user_id,
+            skip=skip,
+            limit=limit,
+        )
         return [
             ConversationView(
                 id=c.id,

@@ -75,13 +75,16 @@ class WorkspaceService:
     async def list_workspaces(
         self,
         user_id: uuid.UUID,
+        *,
+        skip: int = 0,
+        limit: int = 50,
         session: AsyncSession | None = None,
     ) -> list[WorkspaceView]:
         if session is None:
             return []
 
         repo = UserWorkspaceRepository(session)
-        rows = await repo.list_workspaces(user_id)
+        rows = await repo.list_workspaces(user_id, skip=skip, limit=limit)
         return [self._row_to_view(r) for r in rows]
 
     async def get_workspace(
