@@ -68,6 +68,7 @@ export function Login() {
               Username
             </label>
             <input
+              name="username"
               type="text"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -83,6 +84,7 @@ export function Login() {
                 Email
               </label>
               <input
+                name="email"
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
@@ -97,6 +99,7 @@ export function Login() {
               Password
             </label>
             <input
+              name="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
