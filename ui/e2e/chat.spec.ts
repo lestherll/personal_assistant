@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Chat flow", () => {
+  test.skip(!!process.env.CI, "Requires a running LLM provider");
+
   test.beforeEach(async ({ page }) => {
     await page.goto("/login");
     await page.fill('input[type="text"]', "dev");

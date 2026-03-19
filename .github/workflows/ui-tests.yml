@@ -40,12 +40,56 @@ jobs:
   e2e:
     name: E2E tests (Playwright)
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ui
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: personal_assistant_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
     steps:
       - uses: actions/checkout@v4
 
+      # --- Python backend setup ---
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install Python dependencies
+        run: uv sync --frozen
+
+      - name: Run database migrations
+        run: uv run alembic upgrade head
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/personal_assistant_test
+
+      - name: Start backend
+        run: uv run uvicorn api.main:app --host 0.0.0.0 --port 8000 &
+        env:
+          DATABASE_URL: postgresql+asyncpg://postgres:postgres@localhost:5432/personal_assistant_test
+          SECRET_KEY: test-secret-key-for-ci-only-32-bytes!!
+
+      - name: Wait for backend health
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health && exit 0
+            sleep 1
+          done
+          echo "Backend failed to start within 30s"
+          exit 1
+
+      # --- Node / Playwright setup ---
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -55,12 +99,15 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        working-directory: ui
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
+        working-directory: ui
 
       - name: Run E2E tests
         run: npx playwright test
+        working-directory: ui
 
       - name: Upload Playwright report
         if: always()
