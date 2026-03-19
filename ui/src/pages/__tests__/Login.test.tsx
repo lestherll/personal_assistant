@@ -7,8 +7,10 @@ import * as clientModule from "../../api/client";
 
 const mockLogin = vi.fn();
 const mockRegister = vi.fn();
+const mockGetSmartRedirectPath = vi.fn().mockResolvedValue("/workspaces/default/chat/conv-1");
 vi.mock("../../contexts/AuthContext", () => ({
   useAuth: () => ({ login: mockLogin, register: mockRegister }),
+  getSmartRedirectPath: () => mockGetSmartRedirectPath(),
 }));
 
 // Mock useNavigate
@@ -27,15 +29,22 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
+/** Both the "Login" tab button and the submit button match /^login$/i — pick the submit one. */
+function getLoginSubmitButton() {
+  return screen
+    .getAllByRole("button", { name: /^login$/i })
+    .find((b) => b.getAttribute("type") === "submit")!;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mockGetSmartRedirectPath.mockResolvedValue("/workspaces/default/chat/conv-1");
 });
 
 describe("Login page", () => {
   it("renders login tab by default", () => {
     render(<Login />, { wrapper: Wrapper });
-    // Submit button says "Login"; tab button also says "Login" — use the submit type
-    expect(screen.getByRole("button", { name: /^login$/i, hidden: false })).toBeInTheDocument();
+    expect(getLoginSubmitButton()).toBeInTheDocument();
     expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
   });
 
@@ -53,10 +62,12 @@ describe("Login page", () => {
 
     fireEvent.change(screen.getByLabelText(/username/i), { target: { value: "alice" } });
     fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "secret" } });
-    fireEvent.click(screen.getByRole("button", { name: /^login$/i }));
+    fireEvent.click(getLoginSubmitButton());
 
     await waitFor(() => expect(mockLogin).toHaveBeenCalledWith("alice", "secret"));
-    expect(mockNavigate).toHaveBeenCalledWith("/workspaces", { replace: true });
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith("/workspaces/default/chat/conv-1", { replace: true }),
+    );
   });
 
   it("shows error message on login failure", async () => {
@@ -65,7 +76,7 @@ describe("Login page", () => {
 
     fireEvent.change(screen.getByLabelText(/username/i), { target: { value: "alice" } });
     fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "wrong" } });
-    fireEvent.click(screen.getByRole("button", { name: /^login$/i }));
+    fireEvent.click(getLoginSubmitButton());
 
     await waitFor(() => expect(screen.getByText(/error 401/i)).toBeInTheDocument());
   });
@@ -76,10 +87,10 @@ describe("Login page", () => {
 
     fireEvent.change(screen.getByLabelText(/username/i), { target: { value: "alice" } });
     fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "fail" } });
-    fireEvent.click(screen.getByRole("button", { name: /^login$/i }));
+    fireEvent.click(getLoginSubmitButton());
 
     await waitFor(() =>
-      expect(screen.getByText(/something went wrong/i)).toBeInTheDocument()
+      expect(screen.getByText(/something went wrong/i)).toBeInTheDocument(),
     );
   });
 
@@ -95,8 +106,10 @@ describe("Login page", () => {
     fireEvent.click(screen.getByRole("button", { name: /create account/i }));
 
     await waitFor(() =>
-      expect(mockRegister).toHaveBeenCalledWith("alice", "a@example.com", "secret")
+      expect(mockRegister).toHaveBeenCalledWith("alice", "a@example.com", "secret"),
     );
-    expect(mockNavigate).toHaveBeenCalledWith("/workspaces", { replace: true });
+    await waitFor(() =>
+      expect(mockNavigate).toHaveBeenCalledWith("/workspaces/default/chat/conv-1", { replace: true }),
+    );
   });
 });
