@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 from langchain_core.tools import BaseTool
 
 from personal_assistant.core.agent import Agent, AgentConfig
+from personal_assistant.providers.registry import ProviderRegistry
 from personal_assistant.tools.example_tool import AgentInformationTool
 
 
@@ -20,7 +21,7 @@ class TestAgentCreation:
             agent = Agent(agent_config, mock_registry)
             assert agent.get_llm_info()["source"] == "registry"
 
-        mock_provider.get_model.assert_called_with(agent_config.model)
+        mock_provider.get_model.assert_called_with("mock-model")
 
     def test_agent_starts_with_empty_history(self, agent) -> None:
         assert agent.history == []
@@ -169,6 +170,16 @@ class TestStream:
             pass
         assert len(agent.history) > 0
 
+    async def test_stream_captures_token_usage(self, agent) -> None:
+        async for _ in agent.stream("Hello"):
+            pass
+        from langchain_core.messages import AIMessage
+
+        last_ai = next(m for m in reversed(agent.history) if isinstance(m, AIMessage))
+        assert last_ai.usage_metadata is not None
+        assert last_ai.usage_metadata["input_tokens"] == 10
+        assert last_ai.usage_metadata["output_tokens"] == 20
+
 
 class TestAgentFactoryMethods:
     """Tests for Agent factory methods."""
@@ -258,15 +269,15 @@ class TestDeferredGraphRebuild:
 class TestGetLlmInfo:
     """Tests for Agent.get_llm_info()."""
 
-    def test_registry_path_returns_config_values(
+    def test_registry_path_returns_resolved_values(
         self, agent_config, mock_registry, mock_graph
     ) -> None:
         with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
             agent = Agent(agent_config, mock_registry)
         info = agent.get_llm_info()
         assert info["source"] == "registry"
-        assert info["provider"] == agent_config.provider
-        assert info["model"] == agent_config.model
+        assert info["provider"] == "mock"
+        assert info["model"] == "mock-model"
 
     def test_direct_llm_path_returns_class_name(self, agent_config, mock_graph) -> None:
         from langchain_core.language_models import BaseChatModel
@@ -464,3 +475,67 @@ class TestLlmRetry:
         assert call_kwargs.kwargs.get("model") is direct_llm
         middleware = call_kwargs.kwargs.get("middleware", [])
         assert any(isinstance(m, ModelRetryMiddleware) for m in middleware)
+
+
+class TestProviderModelResolution:
+    """Tests that AgentConfig.provider and .model are resolved to concrete values."""
+
+    def test_none_provider_and_model_resolve_to_defaults(self, mock_registry, mock_graph) -> None:
+        config = AgentConfig(
+            name="Test",
+            description="test",
+            system_prompt="test",
+            provider=None,
+            model=None,
+        )
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
+            agent = Agent(config, mock_registry)
+        assert agent.config.provider == "mock"
+        assert agent.config.model == "mock-model"
+
+    def test_explicit_provider_resolves_none_model_to_provider_default(self, mock_graph) -> None:
+        from tests.unit.conftest import make_mock_provider
+
+        provider = make_mock_provider("custom")
+        provider.default_model = "custom-default"
+        registry = ProviderRegistry()
+        registry.register(provider)
+
+        config = AgentConfig(
+            name="Test",
+            description="test",
+            system_prompt="test",
+            provider="custom",
+            model=None,
+        )
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
+            agent = Agent(config, registry)
+        assert agent.config.provider == "custom"
+        assert agent.config.model == "custom-default"
+
+    def test_explicit_model_is_preserved(self, mock_registry, mock_graph) -> None:
+        config = AgentConfig(
+            name="Test",
+            description="test",
+            system_prompt="test",
+            provider=None,
+            model="specific-model",
+        )
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
+            agent = Agent(config, mock_registry)
+        assert agent.config.provider == "mock"
+        assert agent.config.model == "specific-model"
+
+    async def test_run_result_contains_resolved_metadata(self, mock_registry, mock_graph) -> None:
+        config = AgentConfig(
+            name="Test",
+            description="test",
+            system_prompt="test",
+        )
+        with patch("personal_assistant.core.agent.create_agent", return_value=mock_graph):
+            agent = Agent(config, mock_registry)
+        result = await agent.run("Hello")
+        assert result.provider == "mock"
+        assert result.model == "mock-model"
+        assert result.prompt_tokens == 10
+        assert result.completion_tokens == 20

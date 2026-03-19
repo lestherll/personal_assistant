@@ -546,6 +546,9 @@ def _get_from_llm_or_registry(
         case (None, BaseChatModel()):
             return llm
         case (ProviderRegistry(), None):
-            return registry.get(config.provider).get_model(config.model)
+            provider = registry.get(config.provider)
+            config.provider = provider.name
+            config.model = config.model or provider.default_model
+            return provider.get_model(config.model)
         case _:
             raise ValueError("Invalid combination of 'registry' and 'llm' arguments")

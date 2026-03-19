@@ -52,7 +52,11 @@ def agent_config() -> AgentConfig:
 
 
 def make_mock_graph(response: str = "Test response") -> MagicMock:
-    messages = [HumanMessage(content="Hello"), AIMessage(content=response)]
+    usage_metadata = {"input_tokens": 10, "output_tokens": 20, "total_tokens": 30}
+    messages = [
+        HumanMessage(content="Hello"),
+        AIMessage(content=response, usage_metadata=usage_metadata),
+    ]
     graph = MagicMock()
 
     # Sync (kept for tests that inspect call history directly)
@@ -66,7 +70,10 @@ def make_mock_graph(response: str = "Test response") -> MagicMock:
         *args: object, **kwargs: object
     ) -> AsyncGenerator[tuple[AIMessageChunk, dict[str, str]]]:
         yield AIMessageChunk(content="Test "), {"langgraph_node": "agent"}
-        yield AIMessageChunk(content="response"), {"langgraph_node": "agent"}
+        yield (
+            AIMessageChunk(content="response", usage_metadata=usage_metadata),
+            {"langgraph_node": "agent"},
+        )
 
     graph.astream = _astream
     return graph
