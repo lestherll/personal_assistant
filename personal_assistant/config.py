@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 30
     refresh_token_expire_days: int = 7
     auth_disabled: bool = False
+    cookie_secure: bool = False  # Set True when serving over HTTPS
 
     # Persistence
     database_url: str | None = None

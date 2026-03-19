@@ -142,6 +142,71 @@ class TestRefreshEndpoint:
 
 
 # ---------------------------------------------------------------------------
+# Cookie behaviour
+# ---------------------------------------------------------------------------
+
+
+class TestCookieBehaviour:
+    async def test_login_sets_httponly_cookie(self, auth_client: httpx.AsyncClient) -> None:
+        user = _make_user()
+        with _patch_auth_service("login", return_value=(user, "access_tok", "refresh_tok")):
+            resp = await auth_client.post(
+                "/auth/login", data={"username": "alice", "password": "secret"}
+            )
+        assert resp.status_code == 200
+        assert "access_token" in resp.cookies
+        # httpx does not expose httponly in the cookie jar directly;
+        # check the raw Set-Cookie header for the httponly attribute
+        set_cookie = resp.headers.get("set-cookie", "")
+        assert "httponly" in set_cookie.lower()
+        assert "access_token=access_tok" in set_cookie
+
+    async def test_register_sets_httponly_cookie(self, auth_client: httpx.AsyncClient) -> None:
+        user = _make_user()
+        fork_mock = AsyncMock()
+        with (
+            _patch_auth_service("register", return_value=(user, "access_tok", "refresh_tok")),
+            patch("api.routers.auth.fork_default_workspace", fork_mock),
+        ):
+            resp = await auth_client.post(
+                "/auth/register",
+                json={"username": "alice", "email": "alice@example.com", "password": "pw"},
+            )
+        assert resp.status_code == 201
+        set_cookie = resp.headers.get("set-cookie", "")
+        assert "httponly" in set_cookie.lower()
+        assert "access_token=access_tok" in set_cookie
+
+    async def test_refresh_sets_new_cookie(self, auth_client: httpx.AsyncClient) -> None:
+        with _patch_auth_service("refresh", return_value="new_access_tok"):
+            resp = await auth_client.post("/auth/refresh", json={"refresh_token": "some_refresh"})
+        assert resp.status_code == 200
+        set_cookie = resp.headers.get("set-cookie", "")
+        assert "httponly" in set_cookie.lower()
+        assert "access_token=new_access_tok" in set_cookie
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/logout
+# ---------------------------------------------------------------------------
+
+
+class TestLogoutEndpoint:
+    async def test_logout_returns_204(self, auth_client: httpx.AsyncClient) -> None:
+        resp = await auth_client.post("/auth/logout")
+        assert resp.status_code == 204
+
+    async def test_logout_clears_access_token_cookie(self, auth_client: httpx.AsyncClient) -> None:
+        resp = await auth_client.post("/auth/logout")
+        assert resp.status_code == 204
+        # The Set-Cookie header should clear the access_token cookie
+        set_cookie = resp.headers.get("set-cookie", "")
+        assert "access_token" in set_cookie
+        # A deleted cookie has max-age=0 or an empty value
+        assert "max-age=0" in set_cookie.lower() or 'access_token=""' in set_cookie
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

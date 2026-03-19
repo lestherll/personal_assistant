@@ -312,8 +312,13 @@ class AgentService:
         *,
         skip: int = 0,
         limit: int = 50,
+        search_term: str | None = None,
     ) -> list[ConversationView]:
-        """List all conversations for a workspace (requires DB session)."""
+        """List all conversations for a workspace (requires DB session).
+
+        When *search_term* is provided, only conversations whose title contains
+        the term (case-insensitive) are returned.
+        """
         if user_id is None:
             raise NotFoundError("workspace", workspace_name)
 
@@ -328,6 +333,7 @@ class AgentService:
             user_id=user_id,
             skip=skip,
             limit=limit,
+            search_term=search_term,
         )
         return [
             ConversationView(

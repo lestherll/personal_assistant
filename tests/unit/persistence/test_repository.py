@@ -228,6 +228,31 @@ class TestListConversations:
         assert "OFFSET" in sql
         assert "LIMIT" in sql
 
+    async def test_search_term_adds_ilike_filter(self, repo, mock_session):
+        ws_id = uuid.uuid4()
+        mock_session.execute.return_value = _scalars_all_result([])
+
+        await repo.list_conversations(ws_id, search_term="hello")
+
+        stmt = mock_session.execute.call_args.args[0]
+        sql = str(stmt).lower()
+        # ilike renders as LIKE in SQLite (case-insensitive via lower())
+        assert "like" in sql
+        # The search value is bound as a parameter; check its presence via the
+        # compiled parameters rather than the raw SQL string
+        params = stmt.compile().params
+        assert any("%hello%" in str(v) for v in params.values())
+
+    async def test_no_search_term_returns_all(self, repo, mock_session):
+        ws_id = uuid.uuid4()
+        conv1 = Conversation(workspace_id=ws_id)
+        conv2 = Conversation(workspace_id=ws_id)
+        mock_session.execute.return_value = _scalars_all_result([conv1, conv2])
+
+        result = await repo.list_conversations(ws_id, search_term=None)
+
+        assert result == [conv1, conv2]
+
 
 class TestDeleteConversation:
     async def test_deletes_and_returns_true(self, repo, mock_session):

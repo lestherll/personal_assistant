@@ -100,11 +100,18 @@ class ConversationRepository:
         *,
         skip: int = 0,
         limit: int | None = None,
+        search_term: str | None = None,
     ) -> list[Conversation]:
-        """Return all conversations for a workspace, ordered by creation time."""
+        """Return all conversations for a workspace, ordered by creation time.
+
+        When *search_term* is provided, only conversations whose title contains
+        the term (case-insensitive) are returned.
+        """
         conditions = [Conversation.workspace_id == workspace_id]
         if user_id is not None:
             conditions.append(Conversation.user_id == user_id)
+        if search_term:
+            conditions.append(Conversation.title.ilike(f"%{search_term}%"))
         stmt = (
             select(Conversation).where(*conditions).order_by(Conversation.created_at).offset(skip)
         )

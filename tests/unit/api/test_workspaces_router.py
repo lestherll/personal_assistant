@@ -425,6 +425,52 @@ async def test_list_workspace_conversations_passes_pagination(
         mock_db,
         skip=3,
         limit=9,
+        search_term=None,
+    )
+
+
+async def test_list_workspace_conversations_passes_q_to_service(
+    mock_workspace_service: MagicMock,
+    mock_agent_service: MagicMock,
+) -> None:
+    from fastapi import FastAPI
+    from httpx import ASGITransport
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from api.dependencies import (
+        DEV_USER,
+        get_agent_service,
+        get_current_user,
+        get_db_session,
+        get_workspace_service,
+    )
+    from api.exception_handlers import register_exception_handlers
+    from api.routers import workspaces
+
+    mock_db = MagicMock(spec=AsyncSession)
+    mock_agent_service.list_conversations = AsyncMock(return_value=[])
+
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.include_router(workspaces.router)
+    app.dependency_overrides[get_workspace_service] = lambda: mock_workspace_service
+    app.dependency_overrides[get_agent_service] = lambda: mock_agent_service
+    app.dependency_overrides[get_db_session] = lambda: mock_db
+    app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/workspaces/ws1/conversations?q=hello")
+
+    assert response.status_code == 200
+    mock_agent_service.list_conversations.assert_awaited_once_with(
+        DEV_USER.id,
+        "ws1",
+        mock_db,
+        skip=0,
+        limit=50,
+        search_term="hello",
     )
 
 

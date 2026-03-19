@@ -98,9 +98,20 @@ Implemented: `Dockerfile` with uv, `docker-compose.yml` with app + postgres + mi
 
 ---
 
+## Quality of life (P3)
+
+### Conversation export (Markdown/PDF)
+**What:** Export a full conversation thread as a Markdown file or downloadable PDF from the UI.
+**Why:** Useful for saving research outputs, sharing code review feedback, or archiving important assistant responses.
+**Where:** `ui/src/pages/ConversationView.tsx` — add an export button that fetches messages and formats them. PDF via `@react-pdf/renderer` or browser `window.print()`.
+**Effort:** S (human: ~4 hours / CC: ~10 min) | **Priority:** P3
+**Depends on:** Web UI baseline (conversation history view must exist first).
+
+---
+
 ## Roadmap (previously documented)
 
 - **Supervisor streaming** — LangGraph graph-level streaming for workspace chat without requiring `agent_name`. Blocked by LangGraph supervisor graph streaming support.
 - **Redis-backed conversation cache** — drop-in replacement for `InMemoryConversationCache`. Unblocks multi-process deployment and the concurrent chat race condition fix.
 - **More providers** — OpenAI, Groq, Google Gemini. Each is a `AIProvider` subclass + entry in `build_registry()`.
-- **Web UI** — chat interface, workspace composer, template gallery. Build after API hardening is complete.
+- **~~Web UI~~** ✓ — Completed in v0.1.1. React + TypeScript application with chat interface, workspace/agent management, usage dashboard, API key management, command palette, dark mode, responsive design, and conversation search. **Completed:** v0.1.1 (2026-03-19)
