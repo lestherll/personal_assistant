@@ -20,5 +20,8 @@ jobs:
       - name: Install dependencies
         run: uv sync --group dev
 
+      - name: Pre-pull PostgreSQL image for testcontainers
+        run: docker pull postgres:16-alpine
+
       - name: Run tests with coverage
         run: uv run pytest tests/ --cov

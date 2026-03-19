@@ -5,6 +5,10 @@ which starts a real Uvicorn server in a background thread, yields the base
 URL, then shuts it down cleanly.  Running the server in a separate thread
 means its event loop is always active and can accept requests regardless of
 which asyncio event loop the test is currently running.
+
+When Docker is available, a real PostgreSQL container (via testcontainers) is
+used so the test database matches production.  When Docker is unavailable the
+fixture falls back to a temporary SQLite file (via aiosqlite).
 """
 
 from __future__ import annotations
@@ -38,15 +42,93 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
-def _seed_database(db_file: str) -> None:
+# ---------------------------------------------------------------------------
+# Testcontainers helpers
+# ---------------------------------------------------------------------------
+
+
+def _docker_available() -> bool:
+    """Return True if Docker daemon is reachable."""
+    import shutil
+    import subprocess
+
+    if not shutil.which("docker"):
+        return False
+    try:
+        result = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def _start_postgres_container() -> tuple[object, str, str] | None:
+    """Start a PostgreSQL testcontainer.
+
+    Returns ``(container, async_url, sync_url)`` on success, or ``None`` if
+    Docker or testcontainers are not available.
+    """
+    try:
+        from testcontainers.postgres import PostgresContainer
+    except ImportError:
+        return None
+
+    if not _docker_available():
+        return None
+
+    try:
+        container = PostgresContainer("postgres:16-alpine", driver=None)
+        container.start()
+
+        host = container.get_container_host_ip()
+        port = container.get_exposed_port(5432)
+        user = container.username
+        password = container.password
+        dbname = container.dbname
+
+        sync_url = f"postgresql+psycopg://{user}:{password}@{host}:{port}/{dbname}"
+        async_url = f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{dbname}"
+
+        return container, async_url, sync_url
+    except Exception:
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Database seeding
+# ---------------------------------------------------------------------------
+
+
+def _seed_database(sync_url: str) -> None:
     """Create tables and seed the DEV_USER + default workspace synchronously."""
     from personal_assistant.bootstrap import build_registry
     from personal_assistant.core.orchestrator import Orchestrator
     from personal_assistant.persistence.models import Base, User, UserAgent, UserWorkspace
     from personal_assistant.workspaces.default_workspace import create_default_workspace
 
-    sync_url = f"sqlite:///{db_file}"
     engine = sqlalchemy.create_engine(sync_url)
+
+    # On PostgreSQL, manually create the message_role enum type before
+    # create_all because the ORM model declares create_type=False (the
+    # production path relies on Alembic migration 0005 instead).
+    if engine.dialect.name == "postgresql":
+        from personal_assistant.persistence.models import MessageRole
+
+        enum_values = ", ".join(f"'{v.value}'" for v in MessageRole)
+        with engine.connect() as conn:
+            conn.execute(
+                sqlalchemy.text(
+                    f"DO $$ BEGIN "
+                    f"CREATE TYPE message_role AS ENUM ({enum_values}); "
+                    f"EXCEPTION WHEN duplicate_object THEN NULL; "
+                    f"END $$"
+                )
+            )
+            conn.commit()
+
     Base.metadata.create_all(engine)
 
     dev_user_id = _uuid.UUID(int=0)
@@ -106,6 +188,11 @@ def _seed_database(db_file: str) -> None:
     engine.dispose()
 
 
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
 @pytest.fixture(scope="session")
 def live_server_url() -> str:
     """Start a Uvicorn server in a background thread and return its base URL.
@@ -113,11 +200,24 @@ def live_server_url() -> str:
     Session-scoped so the server is started once and shared across all tests.
     Running in a thread (not a coroutine) means the server's event loop is
     always active — tests that run their own event loops can still reach it.
+
+    Tries a real PostgreSQL container (via testcontainers) first; falls back
+    to a temporary SQLite file when Docker is unavailable.
     """
-    # Create a temp SQLite file and seed it before the server starts.
-    db_file = tempfile.mktemp(suffix=".db", prefix="test_pa_")
-    os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_file}"
-    _seed_database(db_file)
+    container = None
+    result = _start_postgres_container()
+
+    if result is not None:
+        container, async_url, sync_url = result
+        os.environ["DATABASE_URL"] = async_url
+        _seed_database(sync_url)
+        print(f"\n[test-db] Using PostgreSQL testcontainer: {async_url}")
+    else:
+        # Fallback: SQLite temp file (original behaviour)
+        db_file = tempfile.mktemp(suffix=".db", prefix="test_pa_")
+        os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_file}"
+        _seed_database(f"sqlite:///{db_file}")
+        print(f"\n[test-db] Using SQLite fallback: {db_file}")
 
     port = _free_port()
     config = uvicorn.Config(app, host="127.0.0.1", port=port, lifespan="on", log_level="warning")
@@ -136,10 +236,14 @@ def live_server_url() -> str:
     thread.start()
     started.wait(timeout=10)
 
-    yield f"http://127.0.0.1:{port}"
+    try:
+        yield f"http://127.0.0.1:{port}"
+    finally:
+        server.should_exit = True
+        thread.join(timeout=10)
 
-    server.should_exit = True
-    thread.join(timeout=10)
+        if container is not None:
+            container.stop()
 
 
 @pytest.fixture
