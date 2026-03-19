@@ -90,7 +90,12 @@ export function ApiKeys() {
           <KeyRow key={k.id} k={k} onRevoke={() => revokeMutation.mutate(k.id)} />
         ))}
         {keys?.length === 0 && (
-          <li className="text-sm text-gray-500">No API keys yet.</li>
+          <li className="rounded-xl border border-dashed border-gray-300 p-6 text-center dark:border-gray-700">
+            <p className="font-medium text-gray-700 dark:text-gray-300">No API keys yet</p>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              API keys let you access your assistant programmatically — from scripts, tools, or other apps.
+            </p>
+          </li>
         )}
       </ul>
 

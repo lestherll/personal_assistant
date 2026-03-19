@@ -12,6 +12,7 @@
     "generate:api": "openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.ts"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.2.8",
     "@tanstack/react-query": "^5.91.0",
     "cmdk": "^1.1.1",
     "highlight.js": "^11.11.1",

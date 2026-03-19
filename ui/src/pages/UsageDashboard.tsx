@@ -149,6 +149,15 @@ export function UsageDashboard() {
       {summaryList === undefined && (
         <p className="text-sm text-gray-400">Loading usage data…</p>
       )}
+
+      {summaryList !== undefined && summaryList.length === 0 && (
+        <div className="rounded-xl border border-dashed border-gray-300 p-8 text-center dark:border-gray-700">
+          <p className="font-medium text-gray-700 dark:text-gray-300">No usage data yet</p>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            Start a conversation with one of your agents to see token usage and cost analytics here.
+          </p>
+        </div>
+      )}
     </div>
   );
 }

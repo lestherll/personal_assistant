@@ -12,12 +12,26 @@ export class UnauthorizedError extends ApiError {
   }
 }
 
-async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+// Set by AuthContext so apiFetch can attempt a silent token refresh on 401.
+// Avoids a circular import between client.ts and AuthContext.tsx.
+let _onUnauthorized: (() => Promise<boolean>) | null = null;
+export function setUnauthorizedHandler(handler: () => Promise<boolean>) {
+  _onUnauthorized = handler;
+}
+
+async function apiFetch<T>(path: string, init?: RequestInit, _retry = true): Promise<T> {
   const res = await fetch(`/api${path}`, {
     ...init,
     credentials: "include",
   });
-  if (res.status === 401) throw new UnauthorizedError();
+  if (res.status === 401) {
+    // Attempt a silent refresh once, then retry the original request.
+    if (_retry && _onUnauthorized) {
+      const refreshed = await _onUnauthorized();
+      if (refreshed) return apiFetch<T>(path, init, false);
+    }
+    throw new UnauthorizedError();
+  }
   if (!res.ok) {
     let message: string | undefined;
     try {
@@ -77,6 +91,8 @@ export const auth = {
     }),
 
   logout: () => apiFetch<void>("/auth/logout", { method: "POST" }),
+
+  me: () => apiFetch<UserResponse>("/auth/me"),
 
   listApiKeys: () => apiFetch<ApiKeyResponse[]>("/auth/api-keys"),
 
@@ -204,8 +220,8 @@ export const workspaces = {
 
   listConversations: (name: string, params?: { skip?: number; limit?: number; q?: string }) => {
     const qs = new URLSearchParams();
-    if (params?.skip) qs.set("skip", String(params.skip));
-    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.skip != null) qs.set("skip", String(params.skip));
+    if (params?.limit != null) qs.set("limit", String(params.limit));
     if (params?.q) qs.set("q", params.q);
     const query = qs.toString() ? `?${qs}` : "";
     return apiFetch<ConversationResponse[]>(`/workspaces/${name}/conversations${query}`);

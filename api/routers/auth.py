@@ -123,6 +123,17 @@ async def logout(response: Response) -> None:
     response.delete_cookie(key="access_token", path="/")
 
 
+@router.get("/me", response_model=UserResponse)
+async def get_me(user: CurrentUserDep) -> UserResponse:
+    """Return the currently authenticated user's profile."""
+    return UserResponse(
+        id=user.id,
+        username=user.username,
+        email=user.email,
+        created_at=user.created_at,
+    )
+
+
 # ---------------------------------------------------------------------------
 # API key management
 # ---------------------------------------------------------------------------

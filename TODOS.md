@@ -109,6 +109,42 @@ Implemented: `Dockerfile` with uv, `docker-compose.yml` with app + postgres + mi
 
 ---
 
+## UI Design Debt (from /plan-design-review 2026-03-19)
+
+### Inline confirmation pattern (replace confirm() dialogs) — P2
+**What:** Replace native `confirm()` on workspace delete and API key revoke with an inline "Are you sure? [Cancel] [Delete]" row within the card.
+**Why:** Native `confirm()` ignores dark mode, looks like a system alert, and is jarring against the polished card UI. Breaks trust at the pixel level.
+**Pros:** Consistent dark mode; fits the design language; no extra library needed.
+**Cons:** A few lines of `confirming: string | null` state per page.
+**Where:** `ui/src/pages/WorkspaceList.tsx`, `ui/src/pages/ApiKeys.tsx`
+**Effort:** XS (human: ~2 hours / CC: ~5 min) | **Priority:** P2
+**Depends on:** None
+
+### Accessibility — aria-live, touch targets, form labels — P2
+**What:** (1) `aria-live="polite"` on the chat message container for streaming. (2) `min-h-[44px]` on all action buttons currently under 44px (History, Delete, Revoke, sidebar hamburger). (3) Explicit `htmlFor`/`id` associations on all form labels.
+**Why:** Screen readers can't follow streaming chat. Small buttons cause mis-taps on mobile. Forms without `htmlFor` break autofill and screen readers.
+**Where:** `ui/src/pages/Chat.tsx`, `ui/src/pages/WorkspaceList.tsx`, `ui/src/pages/ApiKeys.tsx`, `ui/src/pages/AgentConfig.tsx`, `ui/src/pages/Login.tsx`, `ui/src/components/Layout.tsx`
+**Effort:** S (human: ~4 hours / CC: ~15 min) | **Priority:** P2
+**Depends on:** None
+
+### Resume last conversation on login — P2
+**What:** After login, detect the user's most recent conversation and redirect directly to it instead of always landing on `/workspaces`. In `AuthContext` after successful login: fetch workspace list → take first workspace → fetch conversations?limit=1 → if found, navigate to `/workspaces/{name}/chat/{id}`.
+**Why:** The plan vision says "Open it and your most recent conversation is already there." Currently ignored.
+**Pros:** Delivers the stated vision; reduces clicks for daily use.
+**Cons:** Adds 2 extra API calls at login; needs handling for deleted workspaces and no-conversation edge cases.
+**Where:** `ui/src/contexts/AuthContext.tsx`
+**Effort:** S (human: ~3 hours / CC: ~10 min) | **Priority:** P2
+**Depends on:** None
+
+### ConversationHistory responsive split-pane — P2
+**What:** The left panel (`w-72 flex-shrink-0`) overflows on mobile. Fix: `flex-col lg:flex-row` wrapper; on mobile, show list on top with a collapsible preview below (or back-button pattern matching the sidebar).
+**Why:** The plan accepted mobile responsive layout. ConversationHistory is the one page that missed it.
+**Where:** `ui/src/pages/ConversationHistory.tsx`
+**Effort:** S (human: ~2 hours / CC: ~10 min) | **Priority:** P2
+**Depends on:** None
+
+---
+
 ## Roadmap (previously documented)
 
 - **Supervisor streaming** — LangGraph graph-level streaming for workspace chat without requiring `agent_name`. Blocked by LangGraph supervisor graph streaming support.

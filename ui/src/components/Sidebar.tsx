@@ -3,11 +3,19 @@ import { useQuery } from "@tanstack/react-query";
 import { workspaces } from "../api/client";
 import { useTheme } from "../contexts/ThemeContext";
 import { useAuth } from "../contexts/AuthContext";
+import { Avatar } from "./Avatar";
+
+type ThemeOption = "light" | "system" | "dark";
+const THEME_OPTIONS: { value: ThemeOption; label: string }[] = [
+  { value: "light", label: "Light" },
+  { value: "system", label: "Auto" },
+  { value: "dark", label: "Dark" },
+];
 
 export function Sidebar() {
   const { name } = useParams<{ name?: string }>();
-  const { isDark, setTheme } = useTheme();
-  const { logout } = useAuth();
+  const { theme, setTheme } = useTheme();
+  const { user, logout } = useAuth();
 
   const { data: wspaces } = useQuery({
     queryKey: ["workspaces"],
@@ -20,10 +28,16 @@ export function Sidebar() {
     enabled: !!name,
   });
 
+  const displayName = user?.username || "you";
+
   return (
     <aside className="flex h-full w-64 flex-shrink-0 flex-col border-r border-gray-200 bg-gray-50 dark:border-gray-700 dark:bg-gray-900">
-      <div className="flex items-center gap-2 border-b border-gray-200 p-4 dark:border-gray-700">
-        <span className="font-semibold text-gray-800 dark:text-gray-100">Personal Assistant</span>
+      {/* Header — user avatar + username */}
+      <div className="flex items-center gap-3 border-b border-gray-200 p-4 dark:border-gray-700">
+        <Avatar name={displayName} size="md" />
+        <span className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">
+          {displayName}
+        </span>
       </div>
 
       {/* Workspace switcher */}
@@ -36,14 +50,15 @@ export function Sidebar() {
             key={ws.name}
             to={`/workspaces/${ws.name}/chat`}
             className={({ isActive }) =>
-              `block rounded px-2 py-1.5 text-sm ${
+              `flex items-center gap-2 rounded px-2 py-1.5 text-sm ${
                 isActive
                   ? "bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-200"
                   : "text-gray-700 hover:bg-gray-200 dark:text-gray-300 dark:hover:bg-gray-800"
               }`
             }
           >
-            {ws.name}
+            <Avatar name={ws.name} size="sm" />
+            <span className="truncate">{ws.name}</span>
           </NavLink>
         ))}
         <Link
@@ -91,15 +106,28 @@ export function Sidebar() {
         >
           API Keys
         </NavLink>
-        <button
-          onClick={() => setTheme(isDark ? "light" : "dark")}
-          className="rounded px-2 py-1.5 text-left text-sm text-gray-600 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-gray-800"
-        >
-          {isDark ? "Light mode" : "Dark mode"}
-        </button>
+
+        {/* 3-way theme selector */}
+        <div className="mt-1 flex rounded-lg bg-gray-200 p-0.5 dark:bg-gray-800">
+          {THEME_OPTIONS.map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setTheme(opt.value)}
+              className={`flex-1 rounded-md py-1 text-xs font-medium transition-colors ${
+                theme === opt.value
+                  ? "bg-white text-gray-900 shadow-sm dark:bg-gray-700 dark:text-white"
+                  : "text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              }`}
+              aria-pressed={theme === opt.value}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
+
         <button
           onClick={logout}
-          className="rounded px-2 py-1.5 text-left text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+          className="mt-1 rounded px-2 py-1.5 text-left text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
         >
           Logout
         </button>

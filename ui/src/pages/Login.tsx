@@ -64,10 +64,11 @@ export function Login() {
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+            <label htmlFor="login-username" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
               Username
             </label>
             <input
+              id="login-username"
               name="username"
               type="text"
               value={username}
@@ -80,10 +81,11 @@ export function Login() {
 
           {tab === "register" && (
             <div>
-              <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+              <label htmlFor="login-email" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
                 Email
               </label>
               <input
+                id="login-email"
                 name="email"
                 type="email"
                 value={email}
@@ -95,10 +97,11 @@ export function Login() {
           )}
 
           <div>
-            <label className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
+            <label htmlFor="login-password" className="mb-1 block text-xs font-medium text-gray-600 dark:text-gray-400">
               Password
             </label>
             <input
+              id="login-password"
               name="password"
               type="password"
               value={password}
