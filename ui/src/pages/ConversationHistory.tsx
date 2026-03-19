@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { workspaces, type MessageResponse } from "../api/client";
 import { MessageBubble } from "../components/MessageBubble";
@@ -64,7 +64,18 @@ export function ConversationHistory() {
             </button>
           ))}
           {conversations?.length === 0 && (
-            <p className="px-3 py-4 text-xs text-gray-400">No conversations found.</p>
+            <div className="px-3 py-6 text-center">
+              <p className="text-xs font-medium text-gray-500 dark:text-gray-400">No conversations here yet</p>
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                Conversations appear after your first chat in this workspace.
+              </p>
+              <Link
+                to={`/workspaces/${name}/chat`}
+                className="mt-2 inline-block text-xs font-medium text-violet-600 hover:underline dark:text-violet-400"
+              >
+                Go to chat →
+              </Link>
+            </div>
           )}
         </div>
       </div>
@@ -73,7 +84,7 @@ export function ConversationHistory() {
       <div className="flex flex-1 flex-col overflow-y-auto p-4 space-y-3">
         {!selectedId && (
           <div className="flex h-full items-center justify-center text-sm text-gray-400">
-            Select a conversation to preview
+            ← Select a conversation on the left to read it here
           </div>
         )}
         {messages?.map((msg) =>

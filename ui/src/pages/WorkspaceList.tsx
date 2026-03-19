@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { workspaces, agents, ApiError } from "../api/client";
+import { Avatar } from "../components/Avatar";
 
 export function WorkspaceList() {
   const qc = useQueryClient();
@@ -67,16 +68,19 @@ export function WorkspaceList() {
               key={ws.name}
               className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900"
             >
-              <div>
-                <Link
-                  to={`/workspaces/${ws.name}/chat`}
-                  className="font-medium text-violet-600 hover:underline dark:text-violet-400"
-                >
-                  {ws.name}
-                </Link>
-                {ws.description && (
-                  <p className="mt-0.5 text-xs text-gray-500">{ws.description}</p>
-                )}
+              <div className="flex items-center gap-3">
+                <Avatar name={ws.name} size="md" />
+                <div>
+                  <Link
+                    to={`/workspaces/${ws.name}/chat`}
+                    className="font-medium text-violet-600 hover:underline dark:text-violet-400"
+                  >
+                    {ws.name}
+                  </Link>
+                  {ws.description && (
+                    <p className="mt-0.5 text-xs text-gray-500">{ws.description}</p>
+                  )}
+                </div>
               </div>
               <div className="flex gap-2">
                 <Link
@@ -99,13 +103,24 @@ export function WorkspaceList() {
             </li>
           ))}
           {data?.length === 0 && (
-            <li className="text-sm text-gray-500">No workspaces yet. Create one below.</li>
+            <li className="rounded-xl border border-dashed border-gray-300 p-6 text-center dark:border-gray-700">
+              <p className="font-medium text-gray-700 dark:text-gray-300">No workspaces yet</p>
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                A workspace groups agents and conversations around a topic or role.
+              </p>
+              <button
+                onClick={() => document.getElementById("new-workspace-form")?.scrollIntoView({ behavior: "smooth" })}
+                className="mt-3 text-xs font-medium text-violet-600 hover:underline dark:text-violet-400"
+              >
+                Create your first workspace ↓
+              </button>
+            </li>
           )}
         </ul>
       )}
 
       {/* Create form */}
-      <div className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
+      <div id="new-workspace-form" className="rounded-xl border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-900">
         <h3 className="mb-3 text-sm font-medium text-gray-700 dark:text-gray-300">
           New workspace
         </h3>

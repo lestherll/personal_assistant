@@ -5,7 +5,7 @@ import {
   useReducer,
   type ReactNode,
 } from "react";
-import { auth, type UserResponse, UnauthorizedError } from "../api/client";
+import { auth, type UserResponse, UnauthorizedError, setUnauthorizedHandler } from "../api/client";
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 
@@ -46,6 +46,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     status: "loading",
   });
 
+  // Register a global 401 handler so apiFetch can silently refresh and retry.
+  useEffect(() => {
+    setUnauthorizedHandler(async () => {
+      const refresh = localStorage.getItem(REFRESH_TOKEN_KEY);
+      if (!refresh) return false;
+      try {
+        const tokens = await auth.refresh(refresh);
+        localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
+        return true;
+      } catch {
+        localStorage.removeItem(REFRESH_TOKEN_KEY);
+        dispatch({ type: "CLEAR" });
+        return false;
+      }
+    });
+  }, []);
+
+  // On mount: attempt to restore session from stored refresh token.
   useEffect(() => {
     const refresh = localStorage.getItem(REFRESH_TOKEN_KEY);
     if (!refresh) {
@@ -55,21 +73,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     auth
       .refresh(refresh)
-      .then((tokens) => {
+      .then(async (tokens) => {
         localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
-        // Cookie is set server-side; we fetch the current user from the token
-        // by making an authenticated request. Use the workspace list as a
-        // lightweight probe — if it succeeds we're authenticated.
-        // We don't have a /auth/me endpoint so synthesise a minimal user.
-        dispatch({
-          type: "SET_USER",
-          user: {
-            id: "",
-            username: "",
-            email: "",
-            created_at: new Date().toISOString(),
-          },
-        });
+        // Fetch the real user profile now that the access token cookie is set.
+        const user = await auth.me();
+        dispatch({ type: "SET_USER", user });
       })
       .catch((err) => {
         if (err instanceof UnauthorizedError) {
@@ -82,10 +90,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function login(username: string, password: string) {
     const tokens = await auth.login(username, password);
     localStorage.setItem(REFRESH_TOKEN_KEY, tokens.refresh_token);
-    dispatch({
-      type: "SET_USER",
-      user: { id: "", username, email: "", created_at: new Date().toISOString() },
-    });
+    // After login the access token cookie is set; fetch the real profile.
+    const user = await auth.me();
+    dispatch({ type: "SET_USER", user });
   }
 
   async function register(username: string, email: string, password: string) {
