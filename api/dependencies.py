@@ -75,10 +75,18 @@ async def get_db_session(request: Request) -> AsyncIterator[AsyncSession | None]
 async def get_current_user(
     token: Annotated[str | None, Depends(oauth2_scheme)],
     session: Annotated[AsyncSession | None, Depends(get_db_session)],
+    request: Request,
 ) -> User:
-    """Return the current user from JWT, API key, or dev sentinel."""
+    """Return the current user from JWT, API key, or dev sentinel.
+
+    Resolution order:
+    1. ``Authorization: Bearer <token>`` header (API clients, API keys)
+    2. ``access_token`` httpOnly cookie (browser UI)
+    """
     if get_settings().auth_disabled:
         return DEV_USER
+    if token is None:
+        token = request.cookies.get("access_token")
     if token is None:
         raise AuthError("No authentication token provided")
     if session is None:

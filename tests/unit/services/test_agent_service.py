@@ -746,6 +746,7 @@ class TestListConversations:
             user_id=user_id,
             skip=6,
             limit=15,
+            search_term=None,
         )
 
 

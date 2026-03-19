@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,6 +19,7 @@ from api.schemas import (
     UserResponse,
 )
 from personal_assistant.auth.api_keys import generate_api_key
+from personal_assistant.config import get_settings
 from personal_assistant.core.orchestrator import Orchestrator
 from personal_assistant.persistence.api_key_repository import APIKeyRepository
 from personal_assistant.persistence.models import UserAPIKey
@@ -32,6 +33,26 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 DbSessionDep = Annotated[AsyncSession | None, Depends(get_db_session)]
 
 
+def _set_auth_cookie(response: Response, access_token: str) -> None:
+    """Set the httpOnly access_token cookie on a response.
+
+    The cookie is SameSite=Lax which allows cross-site GET requests (e.g.
+    navigating from an external link) while blocking cross-site POSTs (CSRF
+    protection).  The ``secure`` flag is omitted here for local dev; set it
+    via a production-specific override when serving over HTTPS.
+    """
+    settings = get_settings()
+    response.set_cookie(
+        key="access_token",
+        value=access_token,
+        httponly=True,
+        samesite="lax",
+        secure=settings.cookie_secure,
+        max_age=settings.access_token_expire_minutes * 60,
+        path="/",
+    )
+
+
 def _require_session(session: AsyncSession | None) -> AsyncSession:
     if session is None:
         raise ServiceValidationError("Database not configured. Set DATABASE_URL to enable auth.")
@@ -42,6 +63,7 @@ def _require_session(session: AsyncSession | None) -> AsyncSession:
 async def register(
     body: RegisterRequest,
     request: Request,
+    response: Response,
     session: DbSessionDep,
 ) -> RegisterResponse:
     db = _require_session(session)
@@ -57,6 +79,7 @@ async def register(
         default_orchestrator=orchestrator,
         user_workspace_repo=UserWorkspaceRepository(db),
     )
+    _set_auth_cookie(response, access_token)
     return RegisterResponse(
         user=UserResponse(
             id=user.id,
@@ -70,22 +93,34 @@ async def register(
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
-    form: Annotated[OAuth2PasswordRequestForm, Depends()], session: DbSessionDep
+    form: Annotated[OAuth2PasswordRequestForm, Depends()],
+    response: Response,
+    session: DbSessionDep,
 ) -> TokenResponse:
     db = _require_session(session)
     service = AuthService(UserRepository(db))
     _, access_token, refresh_token = await service.login(
         username=form.username, password=form.password
     )
+    _set_auth_cookie(response, access_token)
     return TokenResponse(access_token=access_token, refresh_token=refresh_token)
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(body: RefreshRequest, session: DbSessionDep) -> TokenResponse:
+async def refresh_token(
+    body: RefreshRequest, response: Response, session: DbSessionDep
+) -> TokenResponse:
     db = _require_session(session)
     service = AuthService(UserRepository(db))
     new_access_token = await service.refresh(body.refresh_token)
+    _set_auth_cookie(response, new_access_token)
     return TokenResponse(access_token=new_access_token, refresh_token=body.refresh_token)
+
+
+@router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
+async def logout(response: Response) -> None:
+    """Clear the httpOnly access_token cookie. No auth required."""
+    response.delete_cookie(key="access_token", path="/")
 
 
 # ---------------------------------------------------------------------------

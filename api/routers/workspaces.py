@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -180,11 +180,14 @@ async def list_workspace_conversations(
     current_user: CurrentUserDep,
     skip: PaginationSkip = 0,
     limit: PaginationLimit = 50,
+    q: Annotated[
+        str | None, Query(description="Filter conversations by title (case-insensitive).")
+    ] = None,
 ) -> list[ConversationResponse]:
     if db is None:
         return []
     views = await agent_service.list_conversations(
-        current_user.id, name, db, skip=skip, limit=limit
+        current_user.id, name, db, skip=skip, limit=limit, search_term=q
     )
     return [ConversationResponse.from_view(v) for v in views]
 

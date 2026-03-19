@@ -21,10 +21,13 @@ from personal_assistant.services.exceptions import AuthError
 from personal_assistant.services.workspace_service import WorkspaceService
 
 
-def _make_request(agent_service=None, workspace_service=None) -> MagicMock:
+def _make_request(
+    agent_service=None, workspace_service=None, cookie_token: str | None = None
+) -> MagicMock:
     request = MagicMock()
     request.app.state.agent_service = agent_service or MagicMock(spec=AgentService)
     request.app.state.workspace_service = workspace_service or MagicMock(spec=WorkspaceService)
+    request.cookies.get.return_value = cookie_token
     return request
 
 
@@ -119,6 +122,7 @@ class TestGetCurrentUserApiKey:
         user = _make_user()
         api_key_row = _make_api_key_row(user.id, key_hash)
         session = AsyncMock()
+        request = _make_request()
 
         with (
             patch("api.dependencies.APIKeyRepository") as MockRepo,
@@ -130,12 +134,13 @@ class TestGetCurrentUserApiKey:
             MockRepo.return_value.update_last_used = AsyncMock()
             MockUserRepo.return_value.get_by_id = AsyncMock(return_value=user)
 
-            result = await get_current_user(raw_key, session)
+            result = await get_current_user(raw_key, session, request)
             assert result is user
 
     @pytest.mark.asyncio
     async def test_invalid_api_key_raises(self):
         session = AsyncMock()
+        request = _make_request()
 
         with (
             patch("api.dependencies.APIKeyRepository") as MockRepo,
@@ -145,13 +150,14 @@ class TestGetCurrentUserApiKey:
             MockRepo.return_value.get_by_hash = AsyncMock(return_value=None)
 
             with pytest.raises(AuthError, match="Invalid API key"):
-                await get_current_user("sk-nonexistent", session)
+                await get_current_user("sk-nonexistent", session, request)
 
     @pytest.mark.asyncio
     async def test_revoked_api_key_raises(self):
         raw_key, key_hash = generate_api_key()
         api_key_row = _make_api_key_row(uuid.uuid4(), key_hash, is_active=False)
         session = AsyncMock()
+        request = _make_request()
 
         with (
             patch("api.dependencies.APIKeyRepository") as MockRepo,
@@ -161,7 +167,7 @@ class TestGetCurrentUserApiKey:
             MockRepo.return_value.get_by_hash = AsyncMock(return_value=api_key_row)
 
             with pytest.raises(AuthError, match="revoked"):
-                await get_current_user(raw_key, session)
+                await get_current_user(raw_key, session, request)
 
     @pytest.mark.asyncio
     async def test_expired_api_key_raises(self):
@@ -169,6 +175,7 @@ class TestGetCurrentUserApiKey:
         expired = datetime.now(UTC) - timedelta(days=1)
         api_key_row = _make_api_key_row(uuid.uuid4(), key_hash, expires_at=expired)
         session = AsyncMock()
+        request = _make_request()
 
         with (
             patch("api.dependencies.APIKeyRepository") as MockRepo,
@@ -178,4 +185,69 @@ class TestGetCurrentUserApiKey:
             MockRepo.return_value.get_by_hash = AsyncMock(return_value=api_key_row)
 
             with pytest.raises(AuthError, match="expired"):
-                await get_current_user(raw_key, session)
+                await get_current_user(raw_key, session, request)
+
+
+# ---------------------------------------------------------------------------
+# get_current_user — cookie fallback
+# ---------------------------------------------------------------------------
+
+
+class TestGetCurrentUserCookieFallback:
+    @pytest.mark.asyncio
+    async def test_cookie_used_when_no_authorization_header(self):
+        """Cookie token is used when no Bearer header is present."""
+        user = _make_user()
+        session = AsyncMock()
+        token = "cookie-jwt-token"
+        request = _make_request(cookie_token=token)
+
+        with (
+            patch("api.dependencies.AuthService") as MockAuthService,
+            patch("api.dependencies.get_settings") as mock_settings,
+        ):
+            mock_settings.return_value.auth_disabled = False
+            MockAuthService.return_value.get_user_from_token = AsyncMock(return_value=user)
+
+            result = await get_current_user(None, session, request)
+
+        assert result is user
+        request.cookies.get.assert_called_once_with("access_token")
+        MockAuthService.return_value.get_user_from_token.assert_awaited_once_with(token, session)
+
+    @pytest.mark.asyncio
+    async def test_authorization_header_takes_priority_over_cookie(self):
+        """Bearer header is used even when a cookie is also present."""
+        user = _make_user()
+        session = AsyncMock()
+        header_token = "header-jwt-token"
+        # Cookie also present — should be ignored
+        request = _make_request(cookie_token="cookie-jwt-token")
+
+        with (
+            patch("api.dependencies.AuthService") as MockAuthService,
+            patch("api.dependencies.get_settings") as mock_settings,
+        ):
+            mock_settings.return_value.auth_disabled = False
+            MockAuthService.return_value.get_user_from_token = AsyncMock(return_value=user)
+
+            result = await get_current_user(header_token, session, request)
+
+        assert result is user
+        # Cookie should NOT be consulted when a header token is present
+        request.cookies.get.assert_not_called()
+        MockAuthService.return_value.get_user_from_token.assert_awaited_once_with(
+            header_token, session
+        )
+
+    @pytest.mark.asyncio
+    async def test_no_token_and_no_cookie_raises_auth_error(self):
+        """AuthError raised when both header and cookie are absent."""
+        session = AsyncMock()
+        request = _make_request(cookie_token=None)
+
+        with patch("api.dependencies.get_settings") as mock_settings:
+            mock_settings.return_value.auth_disabled = False
+
+            with pytest.raises(AuthError, match="No authentication token provided"):
+                await get_current_user(None, session, request)
