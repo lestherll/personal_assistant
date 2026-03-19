@@ -1,9 +1,9 @@
-FROM node:22-alpine AS builder
+FROM oven/bun:1-alpine AS builder
 WORKDIR /app
-COPY ui/package.json ui/package-lock.json* ./
-RUN npm install
+COPY ui/package.json ui/bun.lock ./
+RUN bun install --frozen-lockfile
 COPY ui/ .
-RUN npm run build
+RUN bun run build
 
 FROM nginx:1.27-alpine
 COPY nginx/nginx.conf /etc/nginx/conf.d/default.conf

@@ -51,6 +51,7 @@ export function Login() {
           {(["login", "register"] as Tab[]).map((t) => (
             <button
               key={t}
+              type="button"
               onClick={() => { setTab(t); setError(null); }}
               className={`flex-1 rounded-md py-1.5 text-sm font-medium transition-colors ${
                 tab === t
