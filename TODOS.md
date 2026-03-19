@@ -145,6 +145,28 @@ Implemented: `Dockerfile` with uv, `docker-compose.yml` with app + postgres + mi
 
 ---
 
+## Auth & API correctness (from /plan-eng-review 2026-03-19)
+
+### Functional API test for `GET /auth/me` — P1
+**What:** Add a test in `tests/functional/api/` that calls `GET /auth/me` with a valid Bearer token and asserts the correct `UserResponse` fields are returned. Also cover the 401 case (no token or expired token).
+**Why:** The endpoint was added this session but has zero backend test coverage. It is on the critical path for session restore on page refresh.
+**Where:** `tests/functional/api/test_auth.py`
+**Effort:** XS | **Priority:** P1
+
+### Guard against `setUnauthorizedHandler` not yet registered — P2
+**What:** In `apiFetch`, when a 401 arrives and `_onUnauthorized` is `null` (AuthContext not yet mounted), the current code silently throws `UnauthorizedError`. Add a `console.warn` or a sentinel so callers can distinguish "no handler registered" from "handler ran but refresh failed", making debugging easier during startup races.
+**Why:** If a component makes an API call before `AuthProvider` mounts its `useEffect`, the 401 retry is skipped without any indication of why. This is a silent failure that is hard to trace.
+**Where:** `ui/src/api/client.ts` (`apiFetch` 401 branch)
+**Effort:** XS | **Priority:** P2
+
+### Frontend tests for `ConversationHistory` page — P2
+**What:** Add `ui/src/pages/__tests__/ConversationHistory.test.tsx` covering: list of conversations renders, empty state, delete confirmation, navigating into a conversation.
+**Why:** `ConversationHistory.tsx` is one of the more complex pages (paginated list, delete flow, navigation) and currently has zero test coverage.
+**Where:** `ui/src/pages/__tests__/ConversationHistory.test.tsx`
+**Effort:** S | **Priority:** P2
+
+---
+
 ## Roadmap (previously documented)
 
 - **Supervisor streaming** — LangGraph graph-level streaming for workspace chat without requiring `agent_name`. Blocked by LangGraph supervisor graph streaming support.

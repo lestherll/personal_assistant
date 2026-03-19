@@ -31,11 +31,16 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+function getSubmitButton() {
+  return screen
+    .getAllByRole("button", { name: /^login$/i })
+    .find((el) => (el as HTMLButtonElement).type === "submit")!;
+}
+
 describe("Login page", () => {
   it("renders login tab by default", () => {
     render(<Login />, { wrapper: Wrapper });
-    // Submit button says "Login"; tab button also says "Login" — use the submit type
-    expect(screen.getByRole("button", { name: /^login$/i, hidden: false })).toBeInTheDocument();
+    expect(getSubmitButton()).toBeInTheDocument();
     expect(screen.queryByLabelText(/email/i)).not.toBeInTheDocument();
   });
 
@@ -53,7 +58,7 @@ describe("Login page", () => {
 
     fireEvent.change(screen.getByLabelText(/username/i), { target: { value: "alice" } });
     fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "secret" } });
-    fireEvent.click(screen.getByRole("button", { name: /^login$/i }));
+    fireEvent.click(getSubmitButton());
 
     await waitFor(() => expect(mockLogin).toHaveBeenCalledWith("alice", "secret"));
     expect(mockNavigate).toHaveBeenCalledWith("/workspaces", { replace: true });
@@ -65,7 +70,7 @@ describe("Login page", () => {
 
     fireEvent.change(screen.getByLabelText(/username/i), { target: { value: "alice" } });
     fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "wrong" } });
-    fireEvent.click(screen.getByRole("button", { name: /^login$/i }));
+    fireEvent.click(getSubmitButton());
 
     await waitFor(() => expect(screen.getByText(/error 401/i)).toBeInTheDocument());
   });
@@ -76,7 +81,7 @@ describe("Login page", () => {
 
     fireEvent.change(screen.getByLabelText(/username/i), { target: { value: "alice" } });
     fireEvent.change(screen.getByLabelText(/password/i), { target: { value: "fail" } });
-    fireEvent.click(screen.getByRole("button", { name: /^login$/i }));
+    fireEvent.click(getSubmitButton());
 
     await waitFor(() =>
       expect(screen.getByText(/something went wrong/i)).toBeInTheDocument()
