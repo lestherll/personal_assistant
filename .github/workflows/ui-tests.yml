@@ -27,7 +27,15 @@ jobs:
         run: npm ci
 
       - name: Run unit tests
-        run: npm test -- --run
+        run: npm test -- --run --coverage
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: ui/coverage/
+          retention-days: 7
 
   e2e:
     name: E2E tests (Playwright)

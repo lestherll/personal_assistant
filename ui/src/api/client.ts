@@ -286,33 +286,35 @@ export interface ProviderResponse {
 
 export const providers = {
   list: () => apiFetch<ProviderResponse[]>("/providers/"),
-  listModels: (name: string) => apiFetch<string[]>(`/providers/${name}/models`),
+  listModels: (name: string) =>
+    apiFetch<{ name: string; models: string[] }>(`/providers/${name}/models`).then((r) => r.models),
 };
 
 // ---------------------------------------------------------------------------
 // Usage
 // ---------------------------------------------------------------------------
 
-export interface UsageSummaryResponse {
-  total_prompt_tokens: number;
-  total_completion_tokens: number;
+export interface UsageSummaryRecord {
+  workspace: string;
+  provider: string | null;
+  model: string | null;
+  period_start: string;
+  prompt_tokens: number;
+  completion_tokens: number;
   total_tokens: number;
-  request_count: number;
-  by_day: Array<{
-    date: string;
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  }>;
+  estimated_cost_usd: number;
 }
 
 export interface AgentUsageResponse {
   agent_name: string;
-  workspace_name: string;
+  workspace: string;
+  provider: string | null;
+  model: string | null;
+  period_start: string;
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
-  request_count: number;
+  estimated_cost_usd: number;
 }
 
 export const usage = {
@@ -321,7 +323,7 @@ export const usage = {
     if (params?.start) qs.set("start", params.start);
     if (params?.end) qs.set("end", params.end);
     const query = qs.toString() ? `?${qs}` : "";
-    return apiFetch<UsageSummaryResponse>(`/usage/summary${query}`);
+    return apiFetch<UsageSummaryRecord[]>(`/usage/summary${query}`);
   },
   byAgent: (params?: { start?: string; end?: string }) => {
     const qs = new URLSearchParams();

@@ -16,7 +16,7 @@ export function WorkspaceList() {
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const ws = await workspaces.create(newName, newDesc || undefined);
+      const ws = await workspaces.create(newName, newDesc);
       // Agent creation is best-effort — workspace is usable without it
       try {
         await agents.create(ws.name, {

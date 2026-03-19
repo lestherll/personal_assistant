@@ -23,7 +23,7 @@ export function UsageDashboard() {
     end: end || undefined,
   };
 
-  const { data: summary } = useQuery({
+  const { data: summaryList } = useQuery({
     queryKey: ["usage-summary", params],
     queryFn: () => usage.summary(params),
   });
@@ -32,6 +32,33 @@ export function UsageDashboard() {
     queryKey: ["usage-by-agent", params],
     queryFn: () => usage.byAgent(params),
   });
+
+  // Aggregate list of per-workspace/period records into a single display object.
+  const summary =
+    summaryList && summaryList.length > 0
+      ? {
+          total_tokens: summaryList.reduce((s, r) => s + r.total_tokens, 0),
+          total_prompt_tokens: summaryList.reduce((s, r) => s + r.prompt_tokens, 0),
+          total_completion_tokens: summaryList.reduce((s, r) => s + r.completion_tokens, 0),
+          request_count: summaryList.length,
+          by_day: Object.values(
+            summaryList.reduce<
+              Record<
+                string,
+                { date: string; prompt_tokens: number; completion_tokens: number; total_tokens: number }
+              >
+            >((acc, r) => {
+              const date = r.period_start.slice(0, 10);
+              if (!acc[date])
+                acc[date] = { date, prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+              acc[date].prompt_tokens += r.prompt_tokens;
+              acc[date].completion_tokens += r.completion_tokens;
+              acc[date].total_tokens += r.total_tokens;
+              return acc;
+            }, {}),
+          ).sort((a, b) => a.date.localeCompare(b.date)),
+        }
+      : null;
 
   return (
     <div className="mx-auto max-w-4xl p-6">
@@ -119,7 +146,7 @@ export function UsageDashboard() {
         </div>
       )}
 
-      {!summary && (
+      {summaryList === undefined && (
         <p className="text-sm text-gray-400">Loading usage data…</p>
       )}
     </div>
