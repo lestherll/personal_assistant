@@ -128,6 +128,8 @@ async def chat(
         body.message,
         conversation_id=body.conversation_id,
         session=db,
+        title_mode=body.title_mode,
+        title=body.title,
     )
     return ChatResponse(reply=reply, conversation_id=conv_id)
 
@@ -148,6 +150,8 @@ async def chat_stream(
         body.message,
         conversation_id=body.conversation_id,
         session=db,
+        title_mode=body.title_mode,
+        title=body.title,
     )
 
     return StreamingResponse(

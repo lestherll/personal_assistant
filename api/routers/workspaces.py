@@ -135,6 +135,8 @@ async def workspace_chat(
         provider=body.provider,
         model=body.model,
         session=db,
+        title_mode=body.title_mode,
+        title=body.title,
     )
     return WorkspaceChatResponse(
         response=view.response,
@@ -160,6 +162,8 @@ async def workspace_chat_stream(
         provider=body.provider,
         model=body.model,
         session=db,
+        title_mode=body.title_mode,
+        title=body.title,
     )
 
     return StreamingResponse(

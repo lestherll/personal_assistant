@@ -267,7 +267,14 @@ async def test_chat_calls_service(
     mock_agent_service.run_agent = AsyncMock(return_value=("Hello!", _FIXED_UUID))
     await api_client.post("/workspaces/ws1/agents/Assistant/chat", json={"message": "Hi"})
     mock_agent_service.run_agent.assert_called_once_with(
-        DEV_USER.id, "ws1", "Assistant", "Hi", conversation_id=None, session=None
+        DEV_USER.id,
+        "ws1",
+        "Assistant",
+        "Hi",
+        conversation_id=None,
+        session=None,
+        title_mode="llm",
+        title=None,
     )
 
 
@@ -282,7 +289,14 @@ async def test_chat_with_conversation_id_passes_it_to_service(
         json={"message": "Hi", "conversation_id": str(_FIXED_UUID)},
     )
     mock_agent_service.run_agent.assert_called_once_with(
-        DEV_USER.id, "ws1", "Assistant", "Hi", conversation_id=_FIXED_UUID, session=None
+        DEV_USER.id,
+        "ws1",
+        "Assistant",
+        "Hi",
+        conversation_id=_FIXED_UUID,
+        session=None,
+        title_mode="llm",
+        title=None,
     )
 
 
@@ -372,7 +386,14 @@ async def test_chat_stream_calls_service(
     mock_agent_service.stream_agent = AsyncMock(return_value=(_tokens(), _FIXED_UUID))
     await api_client.post("/workspaces/ws1/agents/Assistant/chat/stream", json={"message": "Hi"})
     mock_agent_service.stream_agent.assert_called_once_with(
-        DEV_USER.id, "ws1", "Assistant", "Hi", conversation_id=None, session=None
+        DEV_USER.id,
+        "ws1",
+        "Assistant",
+        "Hi",
+        conversation_id=None,
+        session=None,
+        title_mode="llm",
+        title=None,
     )
 
 

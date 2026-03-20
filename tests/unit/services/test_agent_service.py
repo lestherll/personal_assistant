@@ -10,7 +10,12 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from personal_assistant.services.conversation_cache import InMemoryConversationCache
-from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
+from personal_assistant.services.exceptions import (
+    AlreadyExistsError,
+    NotFoundError,
+    ServiceValidationError,
+)
+from personal_assistant.services.schemas import TitleMode
 from personal_assistant.services.views import AgentView, ConversationView
 from tests.unit.conftest import make_mock_graph, make_mock_provider
 
@@ -660,6 +665,173 @@ class TestConversationTitle:
 
         chunks = [chunk async for chunk in tokens]
         assert chunks == ["hello"]
+
+
+# ---------------------------------------------------------------------------
+# Title mode dispatch
+# ---------------------------------------------------------------------------
+
+
+class TestTitleModes:
+    """Test that _resolve_title dispatches correctly for each TitleMode."""
+
+    def _make_agent(self, history=None):
+        conv_id = uuid.uuid4()
+        agent = MagicMock()
+        agent.history = history if history is not None else []
+        agent.llm = MagicMock()
+        agent.conversation_id = conv_id
+        agent.run = AsyncMock(return_value=MagicMock(content="ok"))
+        return agent, conv_id
+
+    async def _run(self, service, user_id, agent, ws_row, message, title_mode, title=None):
+        service._prepare_agent = AsyncMock(return_value=(agent, ws_row))
+        service._cache.set = AsyncMock()
+        service.rename_conversation = AsyncMock()
+        await service.run_agent(
+            user_id,
+            "ws",
+            "Bot",
+            message,
+            conversation_id=None,
+            session=AsyncMock(),
+            title_mode=title_mode,
+            title=title,
+        )
+
+    async def test_first_20_words_mode_does_not_call_llm(self, service, user_id):
+        agent, _conv_id = self._make_agent()
+        ws_row = MagicMock()
+        ws_row.id = uuid.uuid4()
+        message = " ".join(f"word{i}" for i in range(30))
+
+        with patch(
+            "personal_assistant.services.agent_service._generate_title",
+            new=AsyncMock(),
+        ) as mock_generate_title:
+            await self._run(service, user_id, agent, ws_row, message, TitleMode.FIRST_20_WORDS)
+
+        mock_generate_title.assert_not_awaited()
+        expected_title = " ".join(f"word{i}" for i in range(20))
+        service.rename_conversation.assert_awaited_once()
+        _, kwargs = service.rename_conversation.call_args
+        assert kwargs["title"] == expected_title
+
+    async def test_first_20_words_mode_uses_all_words_when_fewer_than_20(self, service, user_id):
+        agent, _conv_id = self._make_agent()
+        ws_row = MagicMock()
+        ws_row.id = uuid.uuid4()
+        message = "just five words here"
+
+        with patch("personal_assistant.services.agent_service._generate_title", new=AsyncMock()):
+            await self._run(service, user_id, agent, ws_row, message, TitleMode.FIRST_20_WORDS)
+
+        _, kwargs = service.rename_conversation.call_args
+        assert kwargs["title"] == "just five words here"
+
+    async def test_untitled_mode_does_not_call_llm(self, service, user_id):
+        agent, _conv_id = self._make_agent()
+        ws_row = MagicMock()
+        ws_row.id = uuid.uuid4()
+
+        with patch(
+            "personal_assistant.services.agent_service._generate_title",
+            new=AsyncMock(),
+        ) as mock_generate_title:
+            await self._run(service, user_id, agent, ws_row, "hello", TitleMode.UNTITLED)
+
+        mock_generate_title.assert_not_awaited()
+        _, kwargs = service.rename_conversation.call_args
+        assert kwargs["title"] == "Untitled"
+
+    async def test_custom_mode_uses_provided_title(self, service, user_id):
+        agent, _conv_id = self._make_agent()
+        ws_row = MagicMock()
+        ws_row.id = uuid.uuid4()
+
+        with patch("personal_assistant.services.agent_service._generate_title", new=AsyncMock()):
+            await self._run(
+                service, user_id, agent, ws_row, "hello", TitleMode.CUSTOM, title="My Custom Title"
+            )
+
+        _, kwargs = service.rename_conversation.call_args
+        assert kwargs["title"] == "My Custom Title"
+
+    async def test_custom_mode_without_title_raises(self, service, user_id):
+        agent, _conv_id = self._make_agent()
+        ws_row = MagicMock()
+        ws_row.id = uuid.uuid4()
+        service._prepare_agent = AsyncMock(return_value=(agent, ws_row))
+        service._cache.set = AsyncMock()
+        service.rename_conversation = AsyncMock()
+
+        with pytest.raises(ServiceValidationError, match="title is required"):
+            await service.run_agent(
+                user_id,
+                "ws",
+                "Bot",
+                "hello",
+                conversation_id=None,
+                session=AsyncMock(),
+                title_mode=TitleMode.CUSTOM,
+                title=None,
+            )
+
+    async def test_llm_mode_calls_generate_title(self, service, user_id):
+        agent, _conv_id = self._make_agent()
+        ws_row = MagicMock()
+        ws_row.id = uuid.uuid4()
+
+        with patch(
+            "personal_assistant.services.agent_service._generate_title",
+            new=AsyncMock(return_value="LLM Title"),
+        ) as mock_generate_title:
+            await self._run(service, user_id, agent, ws_row, "hello", TitleMode.LLM)
+
+        mock_generate_title.assert_awaited_once_with("hello", agent.llm)
+        _, kwargs = service.rename_conversation.call_args
+        assert kwargs["title"] == "LLM Title"
+
+    async def test_stream_agent_respects_title_mode(self, service, user_id):
+        """stream_agent passes title_mode through to _resolve_title."""
+        conv_id = uuid.uuid4()
+        ws_row = MagicMock()
+        ws_row.id = uuid.uuid4()
+
+        async def _stream(*args, **kwargs):
+            yield MagicMock(content="token")
+
+        agent = MagicMock()
+        agent.history = []
+        agent.llm = MagicMock()
+        agent.conversation_id = conv_id
+        agent.stream = _stream
+
+        service._prepare_agent = AsyncMock(return_value=(agent, ws_row))
+        service._cache.set = AsyncMock()
+        service.rename_conversation = AsyncMock()
+
+        with patch(
+            "personal_assistant.services.agent_service._generate_title",
+            new=AsyncMock(),
+        ) as mock_generate_title:
+            tokens, returned_id = await service.stream_agent(
+                user_id,
+                "ws",
+                "Bot",
+                "hello",
+                conversation_id=None,
+                session=AsyncMock(),
+                title_mode=TitleMode.UNTITLED,
+            )
+
+        assert returned_id == conv_id
+        mock_generate_title.assert_not_awaited()
+        _, kwargs = service.rename_conversation.call_args
+        assert kwargs["title"] == "Untitled"
+
+        chunks = [chunk async for chunk in tokens]
+        assert chunks == ["token"]
 
 
 # ---------------------------------------------------------------------------
