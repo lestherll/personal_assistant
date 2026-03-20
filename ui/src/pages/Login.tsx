@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
+import { useAuth, getSmartRedirectPath } from "../contexts/AuthContext";
 import { ApiError } from "../api/client";
 
 type Tab = "login" | "register";
@@ -26,7 +26,8 @@ export function Login() {
       } else {
         await register(username, email, password);
       }
-      navigate("/workspaces", { replace: true });
+      const path = await getSmartRedirectPath();
+      navigate(path, { replace: true });
     } catch (err) {
       if (err instanceof ApiError) {
         setError(`Error ${err.status}: ${err.message}`);

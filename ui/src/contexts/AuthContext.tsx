@@ -5,7 +5,29 @@ import {
   useReducer,
   type ReactNode,
 } from "react";
-import { auth, type UserResponse, UnauthorizedError, setUnauthorizedHandler } from "../api/client";
+import { auth, workspaces, type UserResponse, UnauthorizedError, setUnauthorizedHandler } from "../api/client";
+
+/**
+ * Resolves the best route to land on after login or when visiting the index
+ * route while authenticated. Picks the most recently updated workspace and
+ * most recent conversation within it, falling back gracefully at each step.
+ */
+export async function getSmartRedirectPath(): Promise<string> {
+  try {
+    const wsList = await workspaces.list();
+    if (!wsList.length) return "/workspaces";
+    const recent = [...wsList].sort(
+      (a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+    )[0];
+    const convs = await workspaces.listConversations(recent.name, { limit: 1 });
+    if (convs.length) {
+      return `/workspaces/${recent.name}/chat/${convs[0].id}`;
+    }
+    return `/workspaces/${recent.name}/chat`;
+  } catch {
+    return "/workspaces";
+  }
+}
 
 type AuthStatus = "loading" | "authenticated" | "unauthenticated";
 

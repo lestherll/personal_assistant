@@ -14,7 +14,8 @@ test.describe("Registration flow", () => {
     await page.fill('input[name="password"]', "testpassword123");
     await page.click('button[type="submit"]');
 
-    // Should land on workspaces after successful registration
+    // Smart redirect lands on the default workspace chat (or workspace list if
+    // no workspace exists yet) — both contain "/workspaces" in the URL.
     await expect(page).toHaveURL(/\/workspaces/, { timeout: 10000 });
   });
 });
