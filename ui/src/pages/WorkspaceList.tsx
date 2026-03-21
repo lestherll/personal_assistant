@@ -9,6 +9,7 @@ export function WorkspaceList() {
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<string | null>(null);
 
   const { data, isLoading } = useQuery({
     queryKey: ["workspaces"],
@@ -89,16 +90,29 @@ export function WorkspaceList() {
                 >
                   History
                 </Link>
-                <button
-                  onClick={() => {
-                    if (confirm(`Delete workspace "${ws.name}"?`)) {
-                      deleteMutation.mutate(ws.name);
-                    }
-                  }}
-                  className="rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
-                >
-                  Delete
-                </button>
+                {confirming === ws.name ? (
+                  <>
+                    <button
+                      onClick={() => setConfirming(null)}
+                      className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => { deleteMutation.mutate(ws.name); setConfirming(null); }}
+                      className="rounded px-2 py-1 text-xs font-medium text-white bg-red-500 hover:bg-red-600"
+                    >
+                      Delete
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={() => setConfirming(ws.name)}
+                    className="rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             </li>
           ))}

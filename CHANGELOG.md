@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.2] - 2026-03-21
+
+### Added
+- **Configurable title mode:** `TitleMode` enum (`llm` | `first_20_words` | `untitled` | `custom`) on `AgentService.run_agent` / `stream_agent` and both chat request schemas — avoids an extra LLM call for non-LLM modes
+- **Functional test for `GET /auth/me`:** Covers authenticated 200 response with correct `UserResponse` fields; 401 tests skip automatically when `AUTH_DISABLED=true`
+
+### Changed
+- Workspace and API key delete/revoke buttons now use inline "Are you sure? Cancel / Confirm" pattern instead of native `confirm()` dialogs — respects dark mode and fits the design system
+- `apiFetch` now logs a `console.warn` when a 401 arrives before `AuthContext` has registered its unauthorized handler, making startup-race failures debuggable
+
+---
+
 ## [0.1.1] - 2026-03-19
 
 ### Added

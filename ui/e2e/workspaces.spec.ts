@@ -91,7 +91,9 @@ test.describe("WorkspaceList page", () => {
     const main = page.locator("main");
     await expect(main.getByRole("link", { name: "my-workspace" })).toBeVisible();
 
-    page.on("dialog", (dialog) => dialog.accept());
+    // First click opens inline confirmation row
+    await page.getByRole("button", { name: /delete/i }).first().click();
+    // Second click confirms the delete
     await page.getByRole("button", { name: /delete/i }).first().click();
 
     await expect(main.getByText(/no workspaces yet/i)).toBeVisible();

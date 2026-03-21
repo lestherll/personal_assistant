@@ -117,7 +117,9 @@ test.describe("ApiKeys page", () => {
     await page.goto("/settings/api-keys");
     await expect(page.getByText("my-key")).toBeVisible();
 
-    page.on("dialog", (dialog) => dialog.accept());
+    // First click opens inline confirmation row
+    await page.getByRole("button", { name: /revoke/i }).click();
+    // Second click confirms the revoke
     await page.getByRole("button", { name: /revoke/i }).click();
 
     // Revoke button disappears (key is now inactive)

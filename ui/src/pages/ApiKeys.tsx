@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { auth, type ApiKeyResponse } from "../api/client";
 
 function KeyRow({ k, onRevoke }: { k: ApiKeyResponse; onRevoke: () => void }) {
+  const [confirming, setConfirming] = useState(false);
   return (
     <li className="flex items-center justify-between rounded-xl border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-900">
       <div>
@@ -16,14 +17,29 @@ function KeyRow({ k, onRevoke }: { k: ApiKeyResponse; onRevoke: () => void }) {
         </p>
       </div>
       {k.is_active && (
-        <button
-          onClick={() => {
-            if (confirm(`Revoke key "${k.name}"?`)) onRevoke();
-          }}
-          className="rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
-        >
-          Revoke
-        </button>
+        confirming ? (
+          <div className="flex gap-2">
+            <button
+              onClick={() => setConfirming(false)}
+              className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => { onRevoke(); setConfirming(false); }}
+              className="rounded px-2 py-1 text-xs font-medium text-white bg-red-500 hover:bg-red-600"
+            >
+              Revoke
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setConfirming(true)}
+            className="rounded px-2 py-1 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20"
+          >
+            Revoke
+          </button>
+        )
       )}
     </li>
   );

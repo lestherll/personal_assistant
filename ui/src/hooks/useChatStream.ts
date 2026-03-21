@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from "react";
-import { streamChat, workspaces, type MessageResponse } from "../api/client";
+import { streamChat, workspaces, type MessageResponse, type TitleMode } from "../api/client";
 
 interface LocalMessage {
   role: "human" | "ai";
@@ -13,7 +13,7 @@ interface ChatStreamState {
   error: string | null;
 }
 
-export function useChatStream(workspaceName: string, agentName: string) {
+export function useChatStream(workspaceName: string, agentName: string, titleMode: TitleMode = "first_20_words") {
   const [state, setState] = useState<ChatStreamState>({
     messages: [],
     isStreaming: false,
@@ -46,6 +46,8 @@ export function useChatStream(workspaceName: string, agentName: string) {
             message,
             ...(agentName && agentName !== "auto" ? { agent_name: agentName } : {}),
             conversation_id: state.conversationId ?? undefined,
+            // Only send title_mode on the first turn; subsequent turns are no-ops anyway
+            ...(state.conversationId == null ? { title_mode: titleMode } : {}),
           },
           (token) => {
             setState((prev) => {
@@ -75,7 +77,7 @@ export function useChatStream(workspaceName: string, agentName: string) {
         }));
       }
     },
-    [workspaceName, agentName, state.conversationId],
+    [workspaceName, agentName, titleMode, state.conversationId],
   );
 
   const stop = useCallback(() => {
