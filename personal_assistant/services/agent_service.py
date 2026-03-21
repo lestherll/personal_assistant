@@ -20,7 +20,12 @@ from personal_assistant.core.agent import Agent, AgentConfig, row_to_message
 from personal_assistant.persistence.repository import AgentParticipationView, ConversationRepository
 from personal_assistant.persistence.user_workspace_repository import UserWorkspaceRepository
 from personal_assistant.services.conversation_cache import ConversationCache
-from personal_assistant.services.exceptions import AlreadyExistsError, NotFoundError
+from personal_assistant.services.exceptions import (
+    AlreadyExistsError,
+    NotFoundError,
+    ServiceValidationError,
+)
+from personal_assistant.services.schemas import TitleMode
 from personal_assistant.services.views import (
     AgentConfigView,
     AgentView,
@@ -193,6 +198,8 @@ class AgentService:
         *,
         conversation_id: uuid.UUID | None,
         session: AsyncSession | None,
+        title_mode: TitleMode = TitleMode.LLM,
+        title: str | None = None,
     ) -> tuple[str, uuid.UUID]:
         """Send a message to an agent and return ``(reply, conversation_id)``."""
         lock = self._get_lock(conversation_id) if conversation_id else None
@@ -207,7 +214,7 @@ class AgentService:
             if is_first_turn and session is not None:
                 assert user_id is not None  # nosec B101 — guaranteed by _prepare_agent
                 assert agent.conversation_id is not None  # nosec B101 — created by start_conversation
-                title = await _generate_title(message, agent.llm)
+                title = await _resolve_title(message, title_mode, agent.llm, title)
                 await self.rename_conversation(
                     user_id=user_id,
                     workspace_name=workspace_name,
@@ -237,6 +244,8 @@ class AgentService:
         *,
         conversation_id: uuid.UUID | None,
         session: AsyncSession | None,
+        title_mode: TitleMode = TitleMode.LLM,
+        title: str | None = None,
     ) -> tuple[AsyncIterator[str], uuid.UUID]:
         """Resolve the conversation then return ``(token_iterator, conversation_id)``.
 
@@ -262,7 +271,7 @@ class AgentService:
         is_first_turn = len(agent.history) == 0
         if is_first_turn and session is not None:
             assert user_id is not None  # nosec B101 — guaranteed by _prepare_agent
-            title = await _generate_title(message, agent.llm)
+            title = await _resolve_title(message, title_mode, agent.llm, title)
             await self.rename_conversation(
                 user_id=user_id,
                 workspace_name=workspace_name,
@@ -566,6 +575,25 @@ class AgentService:
 
         await repo.update_title(conversation_id, title)
         await session.commit()
+
+
+async def _resolve_title(
+    message: str,
+    mode: TitleMode,
+    llm: BaseChatModel,
+    title: str | None,
+) -> str:
+    """Return a conversation title according to *mode*."""
+    if mode == TitleMode.LLM:
+        return await _generate_title(message, llm)
+    if mode == TitleMode.FIRST_20_WORDS:
+        return " ".join(message.split()[:20])[:255]
+    if mode == TitleMode.UNTITLED:
+        return "Untitled"
+    # CUSTOM
+    if title is None:
+        raise ServiceValidationError("title is required when title_mode is 'custom'")
+    return title[:255]
 
 
 async def _generate_title(message: str, llm: BaseChatModel) -> str:

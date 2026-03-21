@@ -67,6 +67,7 @@ async def http_client(live_server_url: str, _auth_token: str) -> AsyncIterator[h
         *,
         conversation_id: uuid.UUID | None,
         session: object,
+        **_kwargs: object,
     ) -> tuple[str, uuid.UUID]:
         return f"Mock reply from {agent_name}", conversation_id or uuid.uuid4()
 
@@ -78,6 +79,7 @@ async def http_client(live_server_url: str, _auth_token: str) -> AsyncIterator[h
         *,
         conversation_id: uuid.UUID | None,
         session: object,
+        **_kwargs: object,
     ) -> tuple[object, uuid.UUID]:
         conv_id = conversation_id or uuid.uuid4()
 

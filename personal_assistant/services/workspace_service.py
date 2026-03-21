@@ -17,6 +17,7 @@ from personal_assistant.services.exceptions import (
     NotFoundError,
     ServiceValidationError,
 )
+from personal_assistant.services.schemas import TitleMode
 from personal_assistant.services.views import (
     AgentConfigView,
     AgentView,
@@ -139,6 +140,8 @@ class WorkspaceService:
         provider: str | None = None,
         model: str | None = None,
         session: AsyncSession | None = None,
+        title_mode: TitleMode = TitleMode.LLM,
+        title: str | None = None,
     ) -> WorkspaceChatView:
         """Route a message to the supervisor or a specific agent."""
         if (provider is not None or model is not None) and agent_name is None:
@@ -154,6 +157,8 @@ class WorkspaceService:
                 message,
                 conversation_id=conv_uuid,
                 session=session,
+                title_mode=title_mode,
+                title=title,
             )
             return WorkspaceChatView(
                 response=reply,
@@ -174,6 +179,8 @@ class WorkspaceService:
             message,
             conversation_id=conv_uuid,
             session=session,
+            title_mode=title_mode,
+            title=title,
         )
         return WorkspaceChatView(
             response=reply,
@@ -191,6 +198,8 @@ class WorkspaceService:
         provider: str | None = None,
         model: str | None = None,
         session: AsyncSession | None = None,
+        title_mode: TitleMode = TitleMode.LLM,
+        title: str | None = None,
     ) -> tuple[AsyncIterator[str], str, str]:
         """Stream a response. Uses supervisor routing when ``agent_name`` is omitted."""
         conv_uuid = self._parse_conversation_id(conversation_id)
@@ -210,6 +219,8 @@ class WorkspaceService:
             message,
             conversation_id=conv_uuid,
             session=session,
+            title_mode=title_mode,
+            title=title,
         )
         return token_iter, str(returned_id), agent_name
 
