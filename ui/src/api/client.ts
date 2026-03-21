@@ -29,6 +29,8 @@ async function apiFetch<T>(path: string, init?: RequestInit, _retry = true): Pro
     if (_retry && _onUnauthorized) {
       const refreshed = await _onUnauthorized();
       if (refreshed) return apiFetch<T>(path, init, false);
+    } else if (_retry && !_onUnauthorized) {
+      console.warn("[apiFetch] 401 received but no unauthorized handler registered — AuthContext may not be mounted yet");
     }
     throw new UnauthorizedError();
   }
