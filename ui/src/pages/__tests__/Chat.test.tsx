@@ -94,9 +94,8 @@ describe("Chat page", () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByRole("combobox")).toBeInTheDocument()
+      expect(screen.getByRole("option", { name: "Auto" })).toBeInTheDocument()
     );
-    expect(screen.getByRole("option", { name: "Auto" })).toBeInTheDocument();
     expect(screen.getByRole("option", { name: "assistant" })).toBeInTheDocument();
   });
 

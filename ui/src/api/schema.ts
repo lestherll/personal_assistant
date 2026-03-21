@@ -75,6 +75,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Me
+         * @description Return the currently authenticated user's profile.
+         */
+        get: operations["get_me_auth_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/api-keys": {
         parameters: {
             query?: never;
@@ -585,6 +605,10 @@ export interface components {
             message: string;
             /** Conversation Id */
             conversation_id?: string | null;
+            /** @default llm */
+            title_mode: components["schemas"]["TitleMode"];
+            /** Title */
+            title?: string | null;
         };
         /** ChatResponse */
         ChatResponse: {
@@ -748,6 +772,12 @@ export interface components {
             /** Title */
             title: string;
         };
+        /**
+         * TitleMode
+         * @description Strategy for generating a conversation title on the first turn.
+         * @enum {string}
+         */
+        TitleMode: "llm" | "first_20_words" | "untitled" | "custom";
         /** TokenResponse */
         TokenResponse: {
             /** Access Token */
@@ -878,6 +908,10 @@ export interface components {
             provider?: string | null;
             /** Model */
             model?: string | null;
+            /** @default llm */
+            title_mode: components["schemas"]["TitleMode"];
+            /** Title */
+            title?: string | null;
         };
         /** WorkspaceChatResponse */
         WorkspaceChatResponse: {
@@ -1041,6 +1075,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_me_auth_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserResponse"];
+                };
             };
         };
     };

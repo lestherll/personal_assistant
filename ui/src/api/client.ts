@@ -49,6 +49,12 @@ async function apiFetch<T>(path: string, init?: RequestInit, _retry = true): Pro
 }
 
 // ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export type TitleMode = "llm" | "first_20_words" | "untitled" | "custom";
+
+// ---------------------------------------------------------------------------
 // Auth
 // ---------------------------------------------------------------------------
 
@@ -212,6 +218,8 @@ export const workspaces = {
       agent_name?: string;
       provider?: string;
       model?: string;
+      title_mode?: TitleMode;
+      title?: string;
     },
   ) =>
     apiFetch<WorkspaceChatResponse>(`/workspaces/${name}/chat`, {

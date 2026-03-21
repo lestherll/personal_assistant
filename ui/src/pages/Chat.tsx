@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { workspaces } from "../api/client";
+import { workspaces, type TitleMode } from "../api/client";
 import { useChatStream } from "../hooks/useChatStream";
 import { MessageBubble } from "../components/MessageBubble";
 import { ChatInput } from "../components/ChatInput";
@@ -11,6 +11,9 @@ export function Chat() {
   const navigate = useNavigate();
   const bottomRef = useRef<HTMLDivElement>(null);
   const [selectedAgent, setSelectedAgent] = useState<string>("");
+  const [titleMode, setTitleMode] = useState<TitleMode>(
+    () => (localStorage.getItem("titleMode") as TitleMode | null) ?? "first_20_words",
+  );
 
   const { data: workspace } = useQuery({
     queryKey: ["workspace", name],
@@ -19,7 +22,7 @@ export function Chat() {
   });
 
   const { messages, isStreaming, conversationId, error, send, stop, loadConversation, clear } =
-    useChatStream(name, selectedAgent);
+    useChatStream(name, selectedAgent, titleMode);
 
   // Reset selected agent and messages when workspace changes
   useEffect(() => {
@@ -80,9 +83,23 @@ export function Chat() {
             ))}
           </select>
         )}
+        <select
+          value={titleMode}
+          onChange={(e) => {
+            const mode = e.target.value as TitleMode;
+            setTitleMode(mode);
+            localStorage.setItem("titleMode", mode);
+          }}
+          className="ml-auto rounded border border-gray-300 bg-white px-2 py-1 text-xs dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200"
+          title="How new conversation titles are generated"
+        >
+          <option value="first_20_words">Title: first words</option>
+          <option value="llm">Title: AI</option>
+          <option value="untitled">Title: none</option>
+        </select>
         <button
           onClick={() => { clear(); navigate(`/workspaces/${name}/chat`, { replace: true }); }}
-          className="ml-auto rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
+          className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800"
         >
           New chat
         </button>
