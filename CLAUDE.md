@@ -67,7 +67,7 @@ personal_assistant/
     ├── workspace_service.py            # WorkspaceService — DB-first stateless CRUD + supervisor routing
     ├── auth_service.py                 # AuthService — register/login/refresh/get_user_from_token
     ├── conversation_cache.py           # ConversationCache ABC + InMemoryConversationCache (LRU)
-    ├── schemas.py                      # Pydantic request models (Create/Update/Chat)
+    ├── schemas.py                      # Pydantic request models (Create/Update/Chat) + TitleMode enum
     ├── views.py                        # Dataclass response views (AgentView, WorkspaceView, ConversationView, …)
     └── exceptions.py                   # NotFoundError, AlreadyExistsError, ServiceValidationError, AuthError, ForbiddenError
 api/
@@ -180,7 +180,7 @@ Future backends can be added by subclassing `ConversationCache` (e.g. `RedisConv
 
 - Constructor: `AgentService(registry, tools, cache)` where `tools` is the global list of available tools and `cache` is a `ConversationCache` instance.
 - Provides CRUD over `UserAgent` DB rows: `create_agent`, `list_agents`, `get_agent`, `update_agent`, `delete_agent`.
-- Chat methods: `run_agent(user_id, workspace_name, agent_name, message, *, conversation_id, session)` and `stream_agent(...)`. Both build an ephemeral `Agent` instance per request by loading config from the DB, restore conversation history from cache (or DB on a miss), run the agent, then write the updated history back to the cache.
+- Chat methods: `run_agent(user_id, workspace_name, agent_name, message, *, conversation_id, session, title_mode, title)` and `stream_agent(...)`. Both build an ephemeral `Agent` instance per request by loading config from the DB, restore conversation history from cache (or DB on a miss), run the agent, then write the updated history back to the cache. `title_mode` controls how the conversation title is generated on the first turn (see `TitleMode` in `services/schemas.py`); `title` is only used when `title_mode=TitleMode.CUSTOM`.
 - Conversation lifecycle: `list_conversations(user_id, workspace_name, session)` and `delete_conversation(user_id, workspace_name, conversation_id, session)`. Both require a DB session.
 
 **`WorkspaceService`** (`services/workspace_service.py`) — DB-first, stateless singleton.
@@ -189,7 +189,7 @@ Future backends can be added by subclassing `ConversationCache` (e.g. `RedisConv
 - Provides CRUD over `UserWorkspace` DB rows: `create_workspace`, `list_workspaces`, `get_workspace`, `update_workspace`, `delete_workspace`.
 - Chat: `chat(...)` and `stream_chat(...)`. When `agent_name` is provided, delegates directly to `AgentService`. Without `agent_name`, loads the workspace's agents from the DB and calls `route()` (lightweight LLM call) to select the best agent, then delegates.
 
-Pydantic schemas in `services/schemas.py` describe request payloads; frozen dataclass views in `services/views.py` describe responses.
+Pydantic schemas in `services/schemas.py` describe request payloads; frozen dataclass views in `services/views.py` describe responses. `TitleMode` (a `StrEnum` in `services/schemas.py`) selects the conversation title strategy: `llm` (default — LLM call), `first_20_words` (no LLM call), `untitled` (literal `"Untitled"`, no LLM call), `custom` (client-supplied via the `title` field). Both `ChatRequest` and `WorkspaceChatRequest` carry `title_mode` and `title` fields.
 
 ### REST API
 FastAPI app in `api/`. Singleton `AgentService` and `WorkspaceService` are created once in the `lifespan` hook and stored on `app.state`. Routers retrieve them via `get_agent_service` / `get_workspace_service` DI functions. Exception handlers in `api/exception_handlers.py` convert service exceptions to HTTP status codes; a catch-all `Exception` handler returns `{"error": "internal_server_error"}` with 500 and logs the full traceback. Start with `uv run fastapi dev api/main.py`.

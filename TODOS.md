@@ -58,6 +58,9 @@ Implemented: `skip`/`limit` query params added to list endpoints with repository
 ### ~~LLM-generated conversation titles~~ ✓
 Implemented: Alembic migration `0010_add_conversation_title.py`; `Conversation.title` storage + API/view exposure; first-turn auto-title generation in `AgentService.run_agent()` and `stream_agent()`; manual rename endpoint at `PATCH /workspaces/{name}/conversations/{conversation_id}` with ownership checks and DB-session validation.
 
+### ~~Configurable title-generation mode~~ ✓
+Implemented: `TitleMode` enum (`llm` | `first_20_words` | `untitled` | `custom`) added to `services/schemas.py`. `run_agent` and `stream_agent` accept `title_mode` and `title` keyword args; `_resolve_title()` dispatcher avoids an extra LLM call for the non-`llm` modes, speeding up local development. Both `ChatRequest` and `WorkspaceChatRequest` expose the new fields; `WorkspaceService.chat` and `stream_chat` thread them through.
+
 ### Workspace template system
 **What:** DB-seeded workspace templates browsable via `GET /templates/` and installable via `POST /templates/{id}/install`. Installing a template creates a new `UserWorkspace` and `UserAgent` rows from the template's agent definitions, analogous to `fork_default_workspace` in `AuthService`. New DB tables: `workspace_templates` and `template_agents`.
 **Why:** The only "template" today is the hardcoded default workspace in `workspaces/default_workspace.py`. There is no way to browse, install, or share workspace configurations. This is the foundation of the "agent gallery" vision — pre-built configurations like "Job Hunt Workspace", "Full-Stack Coding Assistant", "Legal Research Stack".
