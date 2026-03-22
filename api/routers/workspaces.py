@@ -244,6 +244,21 @@ async def list_conversation_messages(
     ]
 
 
+@router.delete("/{name}/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_conversation(
+    name: WorkspaceName,
+    conversation_id: uuid.UUID,
+    user: CurrentUserDep,
+    db: DbSessionDep,
+    agent_service: AgentServiceDep,
+) -> None:
+    if db is None:
+        from personal_assistant.services.exceptions import NotFoundError
+
+        raise NotFoundError("conversation", str(conversation_id))
+    await agent_service.delete_conversation(user.id, name, conversation_id, db)
+
+
 @router.patch("/{name}/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def rename_conversation(
     name: WorkspaceName,

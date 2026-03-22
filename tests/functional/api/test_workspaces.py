@@ -375,3 +375,59 @@ async def test_agent_participation_response_shape(
     assert "agent_name" in first
     assert "message_count" in first
     assert first["message_count"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# DELETE /workspaces/{name}/conversations/{id}
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_conversation_unknown_workspace_returns_404(
+    http_client: httpx.AsyncClient,
+) -> None:
+    random_id = str(uuid.uuid4())
+    response = await http_client.delete(f"/workspaces/nonexistent/conversations/{random_id}")
+
+    assert response.status_code == 404
+
+
+async def test_delete_conversation_unknown_conversation_returns_404(
+    http_client: httpx.AsyncClient,
+) -> None:
+    random_id = str(uuid.uuid4())
+    response = await http_client.delete(f"/workspaces/default/conversations/{random_id}")
+
+    assert response.status_code == 404
+
+
+async def test_delete_conversation_removes_it_from_list(
+    http_client_realdb: httpx.AsyncClient,
+) -> None:
+    chat = await http_client_realdb.post(
+        "/workspaces/default/chat",
+        json={"message": "Delete me.", "agent_name": "Assistant"},
+    )
+    assert chat.status_code == 200
+    conversation_id = chat.json()["conversation_id"]
+
+    delete = await http_client_realdb.delete(f"/workspaces/default/conversations/{conversation_id}")
+    assert delete.status_code == 204
+
+    listed = await http_client_realdb.get("/workspaces/default/conversations")
+    assert listed.status_code == 200
+    ids = [c["id"] for c in listed.json()]
+    assert conversation_id not in ids
+
+
+async def test_delete_conversation_returns_404_on_second_delete(
+    http_client_realdb: httpx.AsyncClient,
+) -> None:
+    chat = await http_client_realdb.post(
+        "/workspaces/default/chat",
+        json={"message": "Delete me twice.", "agent_name": "Assistant"},
+    )
+    conversation_id = chat.json()["conversation_id"]
+
+    await http_client_realdb.delete(f"/workspaces/default/conversations/{conversation_id}")
+    second = await http_client_realdb.delete(f"/workspaces/default/conversations/{conversation_id}")
+    assert second.status_code == 404
