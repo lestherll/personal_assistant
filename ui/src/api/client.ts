@@ -248,6 +248,11 @@ export const workspaces = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title }),
     }),
+
+  deleteConversation: (name: string, conversationId: string) =>
+    apiFetch<void>(`/workspaces/${name}/conversations/${conversationId}`, {
+      method: "DELETE",
+    }),
 };
 
 // ---------------------------------------------------------------------------

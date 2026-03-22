@@ -102,6 +102,7 @@ def mock_agent_service() -> MagicMock:
     svc.run_agent = AsyncMock()
     svc.stream_agent = AsyncMock()
     svc.rename_conversation = AsyncMock()
+    svc.delete_conversation = AsyncMock()
     return svc
 
 
