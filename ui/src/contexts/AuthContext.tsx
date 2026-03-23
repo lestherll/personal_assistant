@@ -5,6 +5,7 @@ import {
   useReducer,
   type ReactNode,
 } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { auth, workspaces, type UserResponse, UnauthorizedError, setUnauthorizedHandler } from "../api/client";
 
 /**
@@ -67,6 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user: null,
     status: "loading",
   });
+  const queryClient = useQueryClient();
 
   // Register a global 401 handler so apiFetch can silently refresh and retry.
   useEffect(() => {
@@ -79,11 +81,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return true;
       } catch {
         localStorage.removeItem(REFRESH_TOKEN_KEY);
+        queryClient.clear();
         dispatch({ type: "CLEAR" });
         return false;
       }
     });
-  }, []);
+  }, [queryClient]);
 
   // On mount: attempt to restore session from stored refresh token.
   useEffect(() => {
@@ -126,6 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   async function logout() {
     await auth.logout().catch(() => {});
     localStorage.removeItem(REFRESH_TOKEN_KEY);
+    queryClient.clear();
     dispatch({ type: "CLEAR" });
   }
 
