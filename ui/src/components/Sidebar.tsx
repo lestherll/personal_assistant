@@ -1,5 +1,5 @@
-import { Link, NavLink, useParams } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { Link, NavLink, useNavigate, useParams } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { workspaces } from "../api/client";
 import { useTheme } from "../contexts/ThemeContext";
 import { useAuth } from "../contexts/AuthContext";
@@ -13,9 +13,11 @@ const THEME_OPTIONS: { value: ThemeOption; label: string }[] = [
 ];
 
 export function Sidebar() {
-  const { name } = useParams<{ name?: string }>();
+  const { name, convId } = useParams<{ name?: string; convId?: string }>();
   const { theme, setTheme } = useTheme();
   const { user, logout } = useAuth();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const { data: wspaces } = useQuery({
     queryKey: ["workspaces"],
@@ -26,6 +28,17 @@ export function Sidebar() {
     queryKey: ["conversations", name],
     queryFn: () => workspaces.listConversations(name!, { limit: 20 }),
     enabled: !!name,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (conversationId: string) =>
+      workspaces.deleteConversation(name!, conversationId),
+    onSuccess: (_data, conversationId) => {
+      queryClient.invalidateQueries({ queryKey: ["conversations", name] });
+      if (convId === conversationId) {
+        navigate(`/workspaces/${name}/chat`);
+      }
+    },
   });
 
   const displayName = user?.username || "you";
@@ -76,19 +89,29 @@ export function Sidebar() {
             Recent
           </p>
           {conversations.map((conv) => (
-            <NavLink
-              key={conv.id}
-              to={`/workspaces/${name}/chat/${conv.id}`}
-              className={({ isActive }) =>
-                `block truncate rounded px-2 py-1.5 text-xs ${
-                  isActive
-                    ? "bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-200"
-                    : "text-gray-600 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-gray-800"
-                }`
-              }
-            >
-              {conv.title ?? "Untitled conversation"}
-            </NavLink>
+            <div key={conv.id} className="group relative flex items-center">
+              <NavLink
+                to={`/workspaces/${name}/chat/${conv.id}`}
+                className={({ isActive }) =>
+                  `block flex-1 truncate rounded px-2 py-1.5 text-xs ${
+                    isActive
+                      ? "bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-200"
+                      : "text-gray-600 hover:bg-gray-200 dark:text-gray-400 dark:hover:bg-gray-800"
+                  }`
+                }
+              >
+                {conv.title ?? "Untitled conversation"}
+              </NavLink>
+              <button
+                aria-label="Delete conversation"
+                onClick={() => deleteMutation.mutate(conv.id)}
+                className="absolute right-1 hidden rounded p-0.5 text-gray-400 hover:bg-red-50 hover:text-red-500 group-hover:flex dark:hover:bg-red-900/20"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3">
+                  <path fillRule="evenodd" d="M5 3.25V4H2.75a.75.75 0 0 0 0 1.5h.3l.815 8.15A1.5 1.5 0 0 0 5.357 15h5.285a1.5 1.5 0 0 0 1.493-1.35l.815-8.15h.3a.75.75 0 0 0 0-1.5H11v-.75A2.25 2.25 0 0 0 8.75 1h-1.5A2.25 2.25 0 0 0 5 3.25Zm2.25-.75a.75.75 0 0 0-.75.75V4h3v-.75a.75.75 0 0 0-.75-.75h-1.5ZM6.05 6a.75.75 0 0 1 .787.713l.275 5.5a.75.75 0 0 1-1.498.075l-.275-5.5A.75.75 0 0 1 6.05 6Zm3.9 0a.75.75 0 0 1 .712.787l-.275 5.5a.75.75 0 0 1-1.498-.075l.275-5.5a.75.75 0 0 1 .786-.711Z" clipRule="evenodd" />
+                </svg>
+              </button>
+            </div>
           ))}
         </div>
       )}

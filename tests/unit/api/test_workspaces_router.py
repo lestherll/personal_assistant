@@ -579,3 +579,100 @@ async def test_rename_conversation_without_db_returns_422(
     assert response.status_code == 422
     assert response.json()["error"] == "validation_error"
     mock_agent_service.rename_conversation.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# DELETE /workspaces/{name}/conversations/{conversation_id}
+# ---------------------------------------------------------------------------
+
+
+async def test_delete_conversation_returns_204_with_db(
+    mock_workspace_service: MagicMock,
+    mock_agent_service: MagicMock,
+) -> None:
+    from fastapi import FastAPI
+    from httpx import ASGITransport
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from api.dependencies import (
+        DEV_USER,
+        get_agent_service,
+        get_current_user,
+        get_db_session,
+        get_workspace_service,
+    )
+    from api.exception_handlers import register_exception_handlers
+    from api.routers import workspaces
+
+    conv_id = uuid.uuid4()
+    mock_db = MagicMock(spec=AsyncSession)
+    mock_agent_service.delete_conversation = AsyncMock(return_value=None)
+
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.include_router(workspaces.router)
+    app.dependency_overrides[get_workspace_service] = lambda: mock_workspace_service
+    app.dependency_overrides[get_agent_service] = lambda: mock_agent_service
+    app.dependency_overrides[get_db_session] = lambda: mock_db
+    app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.delete(f"/workspaces/ws1/conversations/{conv_id}")
+
+    assert response.status_code == 204
+    mock_agent_service.delete_conversation.assert_awaited_once_with(
+        DEV_USER.id, "ws1", conv_id, mock_db
+    )
+
+
+async def test_delete_conversation_not_found_returns_404(
+    mock_workspace_service: MagicMock,
+    mock_agent_service: MagicMock,
+) -> None:
+    from fastapi import FastAPI
+    from httpx import ASGITransport
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from api.dependencies import (
+        DEV_USER,
+        get_agent_service,
+        get_current_user,
+        get_db_session,
+        get_workspace_service,
+    )
+    from api.exception_handlers import register_exception_handlers
+    from api.routers import workspaces
+
+    conv_id = uuid.uuid4()
+    mock_db = MagicMock(spec=AsyncSession)
+    mock_agent_service.delete_conversation = AsyncMock(
+        side_effect=NotFoundError("conversation", str(conv_id))
+    )
+
+    app = FastAPI()
+    register_exception_handlers(app)
+    app.include_router(workspaces.router)
+    app.dependency_overrides[get_workspace_service] = lambda: mock_workspace_service
+    app.dependency_overrides[get_agent_service] = lambda: mock_agent_service
+    app.dependency_overrides[get_db_session] = lambda: mock_db
+    app.dependency_overrides[get_current_user] = lambda: DEV_USER
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.delete(f"/workspaces/ws1/conversations/{conv_id}")
+
+    assert response.status_code == 404
+
+
+async def test_delete_conversation_without_db_returns_404(
+    api_client: httpx.AsyncClient,
+    mock_agent_service: MagicMock,
+) -> None:
+    conv_id = uuid.uuid4()
+    response = await api_client.delete(f"/workspaces/ws1/conversations/{conv_id}")
+
+    assert response.status_code == 404
+    mock_agent_service.delete_conversation.assert_not_awaited()
