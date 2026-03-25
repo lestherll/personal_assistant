@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AuthProvider, useAuth } from "../AuthContext";
 import * as clientModule from "../../api/client";
+import type { ReactNode } from "react";
 
 vi.mock("../../api/client", async () => {
   const actual = await vi.importActual<typeof clientModule>("../../api/client");
@@ -20,6 +22,16 @@ vi.mock("../../api/client", async () => {
 });
 
 const mockedAuth = vi.mocked(clientModule.auth);
+
+function makeQueryClient() {
+  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+}
+
+function makeWrapper(qc: QueryClient) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+  };
+}
 
 function StatusDisplay() {
   const { status, user } = useAuth();
@@ -45,7 +57,8 @@ describe("AuthContext", () => {
     render(
       <AuthProvider>
         <StatusDisplay />
-      </AuthProvider>
+      </AuthProvider>,
+      { wrapper: makeWrapper(makeQueryClient()) }
     );
 
     await waitFor(() =>
@@ -69,7 +82,8 @@ describe("AuthContext", () => {
     render(
       <AuthProvider>
         <StatusDisplay />
-      </AuthProvider>
+      </AuthProvider>,
+      { wrapper: makeWrapper(makeQueryClient()) }
     );
 
     await waitFor(() =>
@@ -86,7 +100,8 @@ describe("AuthContext", () => {
     render(
       <AuthProvider>
         <StatusDisplay />
-      </AuthProvider>
+      </AuthProvider>,
+      { wrapper: makeWrapper(makeQueryClient()) }
     );
 
     await waitFor(() =>
@@ -118,7 +133,8 @@ describe("AuthContext", () => {
       <AuthProvider>
         <Capturer />
         <StatusDisplay />
-      </AuthProvider>
+      </AuthProvider>,
+      { wrapper: makeWrapper(makeQueryClient()) }
     );
 
     await act(async () => {
@@ -127,5 +143,61 @@ describe("AuthContext", () => {
 
     expect(screen.getByTestId("username").textContent).toBe("bob");
     expect(localStorage.getItem("refresh_token")).toBe("rt");
+  });
+
+  it("logout: clears the query cache", async () => {
+    mockedAuth.logout.mockResolvedValue(undefined);
+    const qc = makeQueryClient();
+    const clearSpy = vi.spyOn(qc, "clear");
+
+    let logoutFn!: () => Promise<void>;
+    function Capturer() {
+      const { logout } = useAuth();
+      logoutFn = logout;
+      return null;
+    }
+
+    render(
+      <AuthProvider>
+        <Capturer />
+        <StatusDisplay />
+      </AuthProvider>,
+      { wrapper: makeWrapper(qc) }
+    );
+
+    await act(async () => { await logoutFn(); });
+
+    expect(clearSpy).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("status").textContent).toBe("unauthenticated");
+  });
+
+  it("session expiry (401 handler): clears the query cache", async () => {
+    // No refresh token at mount so the session-restore effect does not consume
+    // it — it just dispatches CLEAR immediately without touching localStorage.
+    const qc = makeQueryClient();
+    const clearSpy = vi.spyOn(qc, "clear");
+
+    let capturedHandler!: () => Promise<boolean>;
+    vi.mocked(clientModule.setUnauthorizedHandler).mockImplementation((h) => {
+      capturedHandler = h;
+    });
+
+    render(
+      <AuthProvider>
+        <StatusDisplay />
+      </AuthProvider>,
+      { wrapper: makeWrapper(qc) }
+    );
+
+    await waitFor(() => expect(capturedHandler).toBeDefined());
+
+    // Simulate a 401 event: provide a token and make refresh fail
+    localStorage.setItem("refresh_token", "expired-token");
+    mockedAuth.refresh.mockRejectedValue(new clientModule.UnauthorizedError());
+
+    await act(async () => { await capturedHandler(); });
+
+    expect(clearSpy).toHaveBeenCalledOnce();
+    expect(screen.getByTestId("status").textContent).toBe("unauthenticated");
   });
 });
